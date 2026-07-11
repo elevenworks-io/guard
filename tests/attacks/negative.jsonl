@@ -12,3 +12,4 @@
 {"desc":"env VAR=x cmd ist legitim","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"env NODE_ENV=prod node app.js"}},"expect":"allowed"}
 {"desc":"rm einzelne Datei ist ok","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm build.log"}},"expect":"allowed"}
 {"desc":"rm dann cp -rf (rf auf cp, nicht rm)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm build.log && cp -rf src dist"}},"expect":"allowed"}
+{"desc":"cp .env.example ist legitim (2b honoriert Allowlist)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"cp .env.example config/"}},"expect":"allowed"}

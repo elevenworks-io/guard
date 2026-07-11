@@ -18,3 +18,5 @@
 {"desc":"rm -Rf (grosses R) blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm -Rf builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
 {"desc":"rm -r -f getrennt blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm -r -f builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
 {"desc":"rm --recursive --force blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm --recursive --force builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
+{"desc":"String-Concat open('.e'+'nv') (known-gap)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"node -e \"require('fs').readFileSync('.e'+'nv')\""}},"expect":"known-gap","note":"Regex-Fragment-Check umgangen; dokumentierte Grenze im README"}
+{"desc":"Variable-Zusammenbau f=.env; cat $f (known-gap)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"f=.en; cat ${f}v"}},"expect":"known-gap","note":"Pfad zur Laufzeit zusammengebaut; nicht statisch erkennbar"}

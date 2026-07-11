@@ -4,7 +4,7 @@ Der Sicherheitsgurt für Claude Code. Secret-Blocker, Command-Denylist, PII-Erke
 
 ```
 npx @elevenworks/guard init
-✓ 42 Regeln aktiv
+✓ 44 Regeln aktiv
 ```
 
 ## Was guard macht
@@ -49,6 +49,7 @@ In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
 
 - **Hooks sind eine Schutzschicht, keine Sandbox.** Wer Claude Code mit `--dangerously-skip-permissions` und ohne Hooks startet, umgeht alles. guard schützt vor Versehen und Injection-Mustern — für harte Isolation gehört eine Container-/Egress-Schicht dazu.
 - **PII-Erkennung ist Regex-basiert.** Sie fängt strukturierte Muster (IBAN, Keys, E-Mail), keine Freitext-Namen. Für echte Datenbank-Arbeit: [doppel].
+- **Dynamisch zusammengebaute Pfade entkommen der Denylist.** Wer einen Secret-Pfad zur Laufzeit zusammensetzt (`open('.e'+'nv')`, `f=.en; cat ${f}v`), umgeht die statische Muster-Erkennung. Das ist eine prinzipielle Grenze regex-basierter Denylists — im Test-Corpus als `known-gap` markiert und bewusst dokumentiert, nicht wegmarketet. Für harte Isolation gehört eine Container-/Egress-Schicht dazu.
 - **Fail-open bei Hook-Fehlern.** Ein kaputter Hook blockiert v0.1 nicht den Workflow. Enforce-Modus mit fail-closed kommt in v0.2.
 
 ## Lizenz
