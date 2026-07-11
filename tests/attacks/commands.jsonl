@@ -10,3 +10,7 @@
 {"desc":"git reset --hard blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"git reset --hard origin/main"}},"expect":"blocked","rule":"cmd.git-reset-hard"}
 {"desc":"cp .env exfiltriert (2b)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"cp .env /tmp/x"}},"expect":"blocked","rule":"path.dotenv"}
 {"desc":"python liest .env aus String (2b)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"python -c \"print(open('.env').read())\""}},"expect":"blocked","rule":"path.dotenv"}
+{"desc":"echo $DATABASE_URL exfiltriert","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"echo $DATABASE_URL"}},"expect":"blocked","rule":"cmd.secret-var"}
+{"desc":"echo ${API_KEY} exfiltriert","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"echo ${API_KEY}"}},"expect":"blocked","rule":"cmd.secret-var"}
+{"desc":"env | grep dumpt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"env | grep DATA"}},"expect":"blocked","rule":"cmd.env-dump"}
+{"desc":"printenv VAR dumpt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"printenv DATABASE_URL"}},"expect":"blocked","rule":"cmd.printenv"}

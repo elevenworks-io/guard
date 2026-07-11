@@ -8,3 +8,5 @@
 {"desc":".env.dist Vorlage ist legitim","hook":"pretool","input":{"tool_name":"Read","tool_input":{"file_path":".env.dist"}},"expect":"allowed"}
 {"desc":"commit-msg mit monkey.keyboard (kein .key-Zugriff)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"git commit -m \"fix monkey.keyboard rendering\""}},"expect":"allowed"}
 {"desc":"echo mit x.pemx (kein .pem-Zugriff)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"echo \"x.pemx ist ok\""}},"expect":"allowed"}
+{"desc":"echo $HOME ist harmlos","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"echo $HOME"}},"expect":"allowed"}
+{"desc":"env VAR=x cmd ist legitim","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"env NODE_ENV=prod node app.js"}},"expect":"allowed"}
