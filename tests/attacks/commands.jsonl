@@ -14,3 +14,7 @@
 {"desc":"echo ${API_KEY} exfiltriert","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"echo ${API_KEY}"}},"expect":"blocked","rule":"cmd.secret-var"}
 {"desc":"env | grep dumpt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"env | grep DATA"}},"expect":"blocked","rule":"cmd.env-dump"}
 {"desc":"printenv VAR dumpt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"printenv DATABASE_URL"}},"expect":"blocked","rule":"cmd.printenv"}
+{"desc":"rm -rf blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm -rf builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
+{"desc":"rm -Rf (grosses R) blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm -Rf builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
+{"desc":"rm -r -f getrennt blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm -r -f builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
+{"desc":"rm --recursive --force blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm --recursive --force builddir"}},"expect":"blocked","rule":"cmd.rm-rf"}
