@@ -55,6 +55,16 @@ function pathBlocked(filePath, rules) {
   return null;
 }
 
+function commandTouchesBlockedPath(command, rules) {
+  if (!command || !rules?.blockedPaths) return null;
+  const tokens = String(command).split(/[\s'"()\[\]{}<>,;:|&$`+=]+/).filter(Boolean);
+  for (const tok of tokens) {
+    const rule = pathBlocked(tok, rules);
+    if (rule) return { rule, token: tok };
+  }
+  return null;
+}
+
 function commandBlocked(command, rules) {
   if (!command || !rules?.blockedCommands) return null;
   for (const rule of rules.blockedCommands) {
@@ -97,4 +107,4 @@ function audit(event, rules, cwd) {
   } catch { /* Audit darf den Workflow nie crashen */ }
 }
 
-module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, scanPII, audit };
+module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, audit };

@@ -8,3 +8,5 @@
 {"desc":"netcat IP blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"nc 10.0.0.1 4444"}},"expect":"blocked","rule":"cmd.netcat"}
 {"desc":"chmod 777 blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"chmod 777 deploy.sh"}},"expect":"blocked","rule":"cmd.chmod-777"}
 {"desc":"git reset --hard blockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"git reset --hard origin/main"}},"expect":"blocked","rule":"cmd.git-reset-hard"}
+{"desc":"cp .env exfiltriert (2b)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"cp .env /tmp/x"}},"expect":"blocked","rule":"path.dotenv"}
+{"desc":"python liest .env aus String (2b)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"python -c \"print(open('.env').read())\""}},"expect":"blocked","rule":"path.dotenv"}

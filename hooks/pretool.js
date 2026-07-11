@@ -2,7 +2,7 @@
 // @elevenworks/guard — PreToolUse Hook
 // Blockiert: Zugriff auf Secret-Dateien, gefährliche Shell-Kommandos.
 "use strict";
-const { readStdin, loadRules, pathBlocked, commandBlocked, audit } = require("./lib.js");
+const { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, audit } = require("./lib.js");
 
 const input = readStdin();
 if (!input) process.exit(0); // fail-open bei kaputtem Input (v0.1-Entscheidung, siehe README)
@@ -38,13 +38,11 @@ if (tool === "Bash" && ti.command) {
     process.exit(2);
   }
   // 2b) Versucht das Kommando, einen geschützten Pfad zu lesen?
-  for (const rule of rules.blockedPaths || []) {
-    const bare = rule.glob.replace(/\*\*\//g, "").replace(/\*/g, "");
-    if (bare.length >= 4 && ti.command.includes(bare)) {
-      audit({ event: "blocked", type: "command-path", tool, command: ti.command.slice(0, 300), ruleId: rule.id, rule: rule.glob }, rules, cwd);
-      process.stderr.write(`[guard] Kommando blockiert: greift auf geschützten Pfad zu (${bare}).`);
-      process.exit(2);
-    }
+  const pathHit = commandTouchesBlockedPath(ti.command, rules);
+  if (pathHit) {
+    audit({ event: "blocked", type: "command-path", tool, command: ti.command.slice(0, 300), ruleId: pathHit.rule.id, rule: pathHit.rule.glob }, rules, cwd);
+    process.stderr.write(`[guard] Kommando blockiert: greift auf geschützten Pfad zu (${pathHit.rule.glob}).`);
+    process.exit(2);
   }
 }
 
