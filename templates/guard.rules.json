@@ -4,44 +4,57 @@
   "mode": "enforce",
 
   "blockedPaths": [
-    "**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/*.p12", "**/*.pfx",
-    "**/id_rsa", "**/id_ed25519", "**/.ssh/**", "**/.aws/**", "**/.kube/**",
-    "**/.npmrc", "**/.pypirc", "**/.netrc", "**/.git-credentials",
-    "**/secrets/**", "**/*.sqlite-dump", "**/*.sql.gz", "**/credentials*.json",
-    "**/serviceaccount*.json", "**/.docker/config.json"
+    { "id": "path.dotenv", "glob": "**/.env" },
+    { "id": "path.dotenv-variant", "glob": "**/.env.*" },
+    { "id": "path.pem", "glob": "**/*.pem" },
+    { "id": "path.key", "glob": "**/*.key" },
+    { "id": "path.p12", "glob": "**/*.p12" },
+    { "id": "path.pfx", "glob": "**/*.pfx" },
+    { "id": "path.id-rsa", "glob": "**/id_rsa" },
+    { "id": "path.id-ed25519", "glob": "**/id_ed25519" },
+    { "id": "path.ssh-dir", "glob": "**/.ssh/**" },
+    { "id": "path.aws-dir", "glob": "**/.aws/**" },
+    { "id": "path.kube-dir", "glob": "**/.kube/**" },
+    { "id": "path.npmrc", "glob": "**/.npmrc" },
+    { "id": "path.pypirc", "glob": "**/.pypirc" },
+    { "id": "path.netrc", "glob": "**/.netrc" },
+    { "id": "path.git-credentials", "glob": "**/.git-credentials" },
+    { "id": "path.secrets-dir", "glob": "**/secrets/**" },
+    { "id": "path.sqlite-dump", "glob": "**/*.sqlite-dump" },
+    { "id": "path.sql-gz", "glob": "**/*.sql.gz" },
+    { "id": "path.credentials-json", "glob": "**/credentials*.json" },
+    { "id": "path.serviceaccount-json", "glob": "**/serviceaccount*.json" },
+    { "id": "path.docker-config", "glob": "**/.docker/config.json" }
   ],
 
   "blockedCommands": [
-    { "pattern": "rm\\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)", "reason": "Rekursives Löschen ist blockiert. Lösche gezielt einzelne Dateien." },
-    { "pattern": "git\\s+push\\s+.*--force", "reason": "Force-Push ist blockiert. Nutze einen Pull Request." },
-    { "pattern": "curl\\s+[^|]*\\|\\s*(ba)?sh", "reason": "Remote-Scripts direkt ausführen ist blockiert. Erst herunterladen, prüfen, dann ausführen." },
-    { "pattern": "wget\\s+[^|]*\\|\\s*(ba)?sh", "reason": "Remote-Scripts direkt ausführen ist blockiert." },
-    { "pattern": "\\b(DROP|TRUNCATE)\\s+(TABLE|DATABASE|SCHEMA)", "reason": "Destruktive DB-Operationen sind blockiert. Schreibe eine Migration und lass sie reviewen.", "flags": "i" },
-    { "pattern": "\\bDELETE\\s+FROM\\s+\\w+\\s*;", "reason": "DELETE ohne WHERE-Klausel ist blockiert.", "flags": "i" },
-    { "pattern": "cat\\s+[^\\s]*\\.env", "reason": "Secrets sind für die KI unsichtbar. Nutze .env.example für die Struktur." },
-    { "pattern": "(printenv|env)\\s*$", "reason": "Environment-Variablen können Secrets enthalten und sind blockiert." },
-    { "pattern": "base64\\s+[^|]*\\.(env|pem|key)", "reason": "Encoding von Secret-Dateien ist blockiert (Exfiltrations-Muster)." },
-    { "pattern": "\\bnc\\s+(-[a-z]+\\s+)*\\d+\\.\\d+\\.\\d+\\.\\d+", "reason": "Direkte Netzwerkverbindungen via netcat sind blockiert." },
-    { "pattern": "chmod\\s+777", "reason": "chmod 777 ist blockiert. Setze gezielte Berechtigungen." },
-    { "pattern": "git\\s+reset\\s+--hard\\s+", "reason": "Hard-Reset auf fremde Refs ist blockiert. Nutze einen neuen Branch." }
+    { "id": "cmd.rm-rf", "pattern": "\\brm\\s+(?=[^;&|]*(?:-[a-zA-Z]*r|--recursive))(?=[^;&|]*(?:-[a-zA-Z]*f|--force))", "flags": "i", "reason": "Rekursives Löschen (rm -rf) ist blockiert. Lösche gezielt einzelne Dateien." },
+    { "id": "cmd.force-push", "pattern": "git\\s+push\\s+.*--force", "reason": "Force-Push ist blockiert. Nutze einen Pull Request." },
+    { "id": "cmd.curl-pipe-sh", "pattern": "curl\\s+[^|]*\\|\\s*(ba)?sh", "reason": "Remote-Scripts direkt ausführen ist blockiert. Erst herunterladen, prüfen, dann ausführen." },
+    { "id": "cmd.wget-pipe-sh", "pattern": "wget\\s+[^|]*\\|\\s*(ba)?sh", "reason": "Remote-Scripts direkt ausführen ist blockiert." },
+    { "id": "cmd.drop-table", "pattern": "\\b(DROP|TRUNCATE)\\s+(TABLE|DATABASE|SCHEMA)", "flags": "i", "reason": "Destruktive DB-Operationen sind blockiert. Schreibe eine Migration und lass sie reviewen." },
+    { "id": "cmd.delete-no-where", "pattern": "\\bDELETE\\s+FROM\\s+\\w+\\s*;", "flags": "i", "reason": "DELETE ohne WHERE-Klausel ist blockiert." },
+    { "id": "cmd.cat-secret", "pattern": "cat\\s+[^\\s]*\\.env", "reason": "Secrets sind für die KI unsichtbar. Nutze .env.example für die Struktur." },
+    { "id": "cmd.printenv", "pattern": "\\bprintenv\\b", "reason": "printenv kann Secrets aus Umgebungsvariablen ausgeben und ist blockiert." },
+    { "id": "cmd.env-dump", "pattern": "\\benv\\s*(\\||$)", "reason": "env (allein oder gepiped) dumpt alle Umgebungsvariablen und ist blockiert." },
+    { "id": "cmd.secret-var", "pattern": "\\$\\{?[A-Za-z_]*(SECRET|PASSWORD|PASSWD|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY|DATABASE_URL|CREDENTIAL|PRIVATE_KEY)", "flags": "i", "reason": "Ausgabe einer secret-verdächtigen Umgebungsvariable ist blockiert. Nutze .env.example für die Struktur." },
+    { "id": "cmd.base64-secret", "pattern": "base64\\s+[^|]*\\.(env|pem|key)", "reason": "Encoding von Secret-Dateien ist blockiert (Exfiltrations-Muster)." },
+    { "id": "cmd.netcat", "pattern": "\\bnc\\s+(-[a-z]+\\s+)*\\d+\\.\\d+\\.\\d+\\.\\d+", "reason": "Direkte Netzwerkverbindungen via netcat sind blockiert." },
+    { "id": "cmd.chmod-777", "pattern": "chmod\\s+[0-7]*777", "reason": "chmod 777 ist blockiert. Setze gezielte Berechtigungen." },
+    { "id": "cmd.git-reset-hard", "pattern": "git\\s+reset\\s+--hard\\s+", "reason": "Hard-Reset auf fremde Refs ist blockiert. Nutze einen neuen Branch." }
   ],
 
   "piiPatterns": [
-    { "name": "E-Mail-Adresse", "pattern": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "action": "warn", "allowDomains": ["example.com", "test.de", "elevenworks.io"] },
-    { "name": "IBAN", "pattern": "\\b[A-Z]{2}\\d{2}[A-Z0-9]{11,30}\\b", "action": "block" },
-    { "name": "Deutsche Telefonnummer", "pattern": "\\b(\\+49|0049|0)[1-9]\\d{1,4}[\\s/-]?\\d{3,10}\\b", "action": "warn" },
-    { "name": "Deutsche Steuer-ID", "pattern": "\\b\\d{2}\\s?\\d{3}\\s?\\d{3}\\s?\\d{3}\\b", "action": "warn" },
-    { "name": "AWS Access Key", "pattern": "\\bAKIA[0-9A-Z]{16}\\b", "action": "block" },
-    { "name": "Private Key Block", "pattern": "-----BEGIN [A-Z ]*PRIVATE KEY-----", "action": "block" },
-    { "name": "JWT", "pattern": "\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b", "action": "block" },
-    { "name": "Anthropic API Key", "pattern": "\\bsk-ant-[A-Za-z0-9_-]{20,}\\b", "action": "block" },
-    { "name": "Generischer API Key", "pattern": "\\b(api[_-]?key|secret|token)\\s*[:=]\\s*['\"][A-Za-z0-9_-]{16,}['\"]", "action": "block", "flags": "i" }
+    { "id": "pii.email", "name": "E-Mail-Adresse", "pattern": "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", "action": "warn", "allowDomains": ["example.com", "test.de", "elevenworks.io"] },
+    { "id": "pii.iban", "name": "IBAN", "pattern": "\\b[A-Z]{2}\\d{2}[A-Z0-9]{11,30}\\b", "action": "block" },
+    { "id": "pii.phone-de", "name": "Deutsche Telefonnummer", "pattern": "\\b(\\+49|0049|0)[1-9]\\d{1,4}[\\s/-]?\\d{3,10}\\b", "action": "warn" },
+    { "id": "pii.steuer-id", "name": "Deutsche Steuer-ID", "pattern": "\\b\\d{2}\\s?\\d{3}\\s?\\d{3}\\s?\\d{3}\\b", "action": "warn" },
+    { "id": "pii.aws-key", "name": "AWS Access Key", "pattern": "\\bAKIA[0-9A-Z]{16}\\b", "action": "block" },
+    { "id": "pii.private-key", "name": "Private Key Block", "pattern": "-----BEGIN [A-Z ]*PRIVATE KEY-----", "action": "block" },
+    { "id": "pii.jwt", "name": "JWT", "pattern": "\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b", "action": "block" },
+    { "id": "pii.anthropic-key", "name": "Anthropic API Key", "pattern": "\\bsk-ant-[A-Za-z0-9_-]{20,}\\b", "action": "block" },
+    { "id": "pii.generic-api-key", "name": "Generischer API Key", "pattern": "\\b(api[_-]?key|secret|token)\\s*[:=]\\s*['\"][A-Za-z0-9_-]{16,}['\"]", "action": "block", "flags": "i" }
   ],
 
-  "audit": {
-    "enabled": true,
-    "path": ".claude/guard-audit.jsonl",
-    "logAllowed": true,
-    "logBlocked": true
-  }
+  "audit": { "enabled": true, "path": ".claude/guard-audit.jsonl", "logAllowed": true, "logBlocked": true }
 }

@@ -41,8 +41,8 @@ function globToRegex(glob) {
 function pathBlocked(filePath, rules) {
   if (!filePath || !rules?.blockedPaths) return null;
   const norm = String(filePath).replace(/\\/g, "/");
-  for (const glob of rules.blockedPaths) {
-    if (globToRegex(glob).test(norm)) return glob;
+  for (const rule of rules.blockedPaths) {
+    if (globToRegex(rule.glob).test(norm)) return rule; // { id, glob }
   }
   return null;
 }
@@ -67,7 +67,7 @@ function scanPII(text, rules) {
       const matches = text.match(re) || [];
       for (const m of matches) {
         if (p.allowDomains && p.allowDomains.some((d) => m.toLowerCase().endsWith("@" + d) || m.toLowerCase().endsWith("." + d))) continue;
-        hits.push({ name: p.name, action: p.action || "warn", sample: mask(m) });
+        hits.push({ ruleId: p.id, name: p.name, action: p.action || "warn", sample: mask(m) });
       }
     } catch { /* fehlerhafte Regel überspringen */ }
   }

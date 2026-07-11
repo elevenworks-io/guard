@@ -19,9 +19,9 @@ const fileTarget = ti.file_path || ti.path || ti.notebook_path || null;
 if (fileTarget) {
   const hit = pathBlocked(fileTarget, rules);
   if (hit) {
-    audit({ event: "blocked", type: "path", tool, target: fileTarget, rule: hit }, rules, cwd);
+    audit({ event: "blocked", type: "path", tool, target: fileTarget, ruleId: hit.id, rule: hit.glob }, rules, cwd);
     process.stderr.write(
-      `[guard] Zugriff blockiert: "${fileTarget}" ist als Secret/geschützter Pfad klassifiziert (Regel: ${hit}). ` +
+      `[guard] Zugriff blockiert: "${fileTarget}" ist als Secret/geschützter Pfad klassifiziert (Regel: ${hit.id}). ` +
       `Nutze .env.example oder frage den Menschen nach einer freigegebenen Alternative.`
     );
     process.exit(2);
@@ -33,15 +33,15 @@ if (tool === "Bash" && ti.command) {
   // 2a) Kommando-Denylist
   const cmdHit = commandBlocked(ti.command, rules);
   if (cmdHit) {
-    audit({ event: "blocked", type: "command", tool, command: ti.command.slice(0, 300), rule: cmdHit.pattern }, rules, cwd);
+    audit({ event: "blocked", type: "command", tool, command: ti.command.slice(0, 300), ruleId: cmdHit.id, rule: cmdHit.pattern }, rules, cwd);
     process.stderr.write(`[guard] Kommando blockiert: ${cmdHit.reason}`);
     process.exit(2);
   }
   // 2b) Versucht das Kommando, einen geschützten Pfad zu lesen?
-  for (const glob of rules.blockedPaths || []) {
-    const bare = glob.replace(/\*\*\//g, "").replace(/\*/g, "");
+  for (const rule of rules.blockedPaths || []) {
+    const bare = rule.glob.replace(/\*\*\//g, "").replace(/\*/g, "");
     if (bare.length >= 4 && ti.command.includes(bare)) {
-      audit({ event: "blocked", type: "command-path", tool, command: ti.command.slice(0, 300), rule: glob }, rules, cwd);
+      audit({ event: "blocked", type: "command-path", tool, command: ti.command.slice(0, 300), ruleId: rule.id, rule: rule.glob }, rules, cwd);
       process.stderr.write(`[guard] Kommando blockiert: greift auf geschützten Pfad zu (${bare}).`);
       process.exit(2);
     }
