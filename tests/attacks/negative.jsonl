@@ -3,3 +3,5 @@
 {"desc":"ls ist harmlos","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"ls -la src"}},"expect":"allowed"}
 {"desc":"E-Mail auf Allowlist-Domain ist still","hook":"prompt","input":{"prompt":"Ticket an support@example.com"},"expect":"allowed"}
 {"desc":"harmloser Prompt","hook":"prompt","input":{"prompt":"Erkläre mir die Fehlermeldung im Checkout"},"expect":"allowed"}
+{"desc":".env.sample ist legitim","hook":"pretool","input":{"tool_name":"Read","tool_input":{"file_path":".env.sample"}},"expect":"allowed"}
+{"desc":"nested .env.example ist legitim","hook":"pretool","input":{"tool_name":"Read","tool_input":{"file_path":"config/.env.example"}},"expect":"allowed"}

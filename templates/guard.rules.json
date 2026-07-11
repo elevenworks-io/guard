@@ -3,6 +3,11 @@
   "version": 1,
   "mode": "enforce",
 
+  "allowPaths": [
+    "**/.env.example", "**/.env.sample", "**/.env.template", "**/.env.dist",
+    "**/*.example", "**/*.sample", "**/*.template", "**/*.dist"
+  ],
+
   "blockedPaths": [
     { "id": "path.dotenv", "glob": "**/.env" },
     { "id": "path.dotenv-variant", "glob": "**/.env.*" },

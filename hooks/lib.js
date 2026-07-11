@@ -28,12 +28,15 @@ function loadRules(cwd) {
   return null;
 }
 
-// Minimaler Glob-Matcher: unterstützt ** und * (reicht für Pfad-Denylists)
+// Glob-Matcher: **/ matcht null oder mehr Pfadsegmente (inkl. keins),
+// ** matcht beliebig, * bleibt innerhalb eines Segments.
 function globToRegex(glob) {
   const esc = glob
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*\//g, "§§DSLASH§§")
     .replace(/\*\*/g, "§§DOUBLE§§")
     .replace(/\*/g, "[^/]*")
+    .replace(/§§DSLASH§§/g, "(?:.*/)?")
     .replace(/§§DOUBLE§§/g, ".*");
   return new RegExp("(^|/)" + esc + "$");
 }
@@ -41,6 +44,11 @@ function globToRegex(glob) {
 function pathBlocked(filePath, rules) {
   if (!filePath || !rules?.blockedPaths) return null;
   const norm = String(filePath).replace(/\\/g, "/");
+  // Safe template files (.env.example, *.sample, …) are explicitly allowed even
+  // when they match a blocked pattern — guard itself recommends .env.example.
+  for (const glob of rules.allowPaths || []) {
+    if (globToRegex(glob).test(norm)) return null;
+  }
   for (const rule of rules.blockedPaths) {
     if (globToRegex(rule.glob).test(norm)) return rule; // { id, glob }
   }
