@@ -38,13 +38,13 @@
     { "id": "cmd.wget-pipe-sh", "pattern": "wget\\s+[^|]*\\|\\s*(ba)?sh", "reason": "Remote-Scripts direkt ausführen ist blockiert." },
     { "id": "cmd.drop-table", "pattern": "\\b(DROP|TRUNCATE)\\s+(TABLE|DATABASE|SCHEMA)", "flags": "i", "reason": "Destruktive DB-Operationen sind blockiert. Schreibe eine Migration und lass sie reviewen." },
     { "id": "cmd.delete-no-where", "pattern": "\\bDELETE\\s+FROM\\s+\\w+\\s*;", "flags": "i", "reason": "DELETE ohne WHERE-Klausel ist blockiert." },
-    { "id": "cmd.cat-secret", "pattern": "cat\\s+[^\\s]*\\.env", "reason": "Secrets sind für die KI unsichtbar. Nutze .env.example für die Struktur." },
+    { "id": "cmd.cat-secret", "pattern": "cat\\s+[^\\s]*\\.env(?!\\.(example|sample|template|dist))", "reason": "Secrets sind für die KI unsichtbar. Nutze .env.example für die Struktur." },
     { "id": "cmd.printenv", "pattern": "\\bprintenv\\b", "reason": "printenv kann Secrets aus Umgebungsvariablen ausgeben und ist blockiert." },
     { "id": "cmd.env-dump", "pattern": "\\benv\\s*(\\||$)", "reason": "env (allein oder gepiped) dumpt alle Umgebungsvariablen und ist blockiert." },
     { "id": "cmd.secret-var", "pattern": "\\$\\{?[A-Za-z_]*(SECRET|PASSWORD|PASSWD|TOKEN|API[_-]?KEY|ACCESS[_-]?KEY|DATABASE_URL|CREDENTIAL|PRIVATE_KEY)", "flags": "i", "reason": "Ausgabe einer secret-verdächtigen Umgebungsvariable ist blockiert. Nutze .env.example für die Struktur." },
-    { "id": "cmd.base64-secret", "pattern": "base64\\s+[^|]*\\.(env|pem|key)", "reason": "Encoding von Secret-Dateien ist blockiert (Exfiltrations-Muster)." },
+    { "id": "cmd.base64-secret", "pattern": "base64\\s+[^|]*\\.(env|pem|key)(?!\\.(example|sample|template|dist))", "reason": "Encoding von Secret-Dateien ist blockiert (Exfiltrations-Muster)." },
     { "id": "cmd.netcat", "pattern": "\\bnc\\s+(-[a-z]+\\s+)*\\d+\\.\\d+\\.\\d+\\.\\d+", "reason": "Direkte Netzwerkverbindungen via netcat sind blockiert." },
-    { "id": "cmd.chmod-777", "pattern": "chmod\\s+[0-7]*777", "reason": "chmod 777 ist blockiert. Setze gezielte Berechtigungen." },
+    { "id": "cmd.chmod-777", "pattern": "chmod\\s+(-\\S+\\s+)*[0-7]*777", "reason": "chmod 777 ist blockiert. Setze gezielte Berechtigungen." },
     { "id": "cmd.git-reset-hard", "pattern": "git\\s+reset\\s+--hard\\s+", "reason": "Hard-Reset auf fremde Refs ist blockiert. Nutze einen neuen Branch." }
   ],
 

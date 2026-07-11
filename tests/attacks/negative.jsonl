@@ -13,3 +13,6 @@
 {"desc":"rm einzelne Datei ist ok","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm build.log"}},"expect":"allowed"}
 {"desc":"rm dann cp -rf (rf auf cp, nicht rm)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"rm build.log && cp -rf src dist"}},"expect":"allowed"}
 {"desc":"cp .env.example ist legitim (2b honoriert Allowlist)","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"cp .env.example config/"}},"expect":"allowed"}
+{"desc":"cat .env.example (Vorlage) wird nicht als Secret geblockt","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"cat .env.example"}},"expect":"allowed"}
+{"desc":"base64 einer .env.example-Vorlage ist legitim","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"base64 .env.example"}},"expect":"allowed"}
+{"desc":"absoluter Pfad zu .env.example ist legitim","hook":"pretool","input":{"tool_name":"Read","tool_input":{"file_path":"/Users/dev/project/.env.example"}},"expect":"allowed"}
