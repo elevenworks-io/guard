@@ -66,3 +66,8 @@ test("meta: rule ids are unique", () => {
   const all = [...(RULES.blockedPaths || []), ...(RULES.blockedCommands || []), ...(RULES.piiPatterns || [])].map((r) => r.id);
   assert.strictEqual(all.length, new Set(all).size, "duplicate rule id");
 });
+test("meta: every rule id is covered by >=1 blocked/warn fixture", () => {
+  const covered = new Set(fixtures.filter((f) => f.expect === "blocked" || f.expect === "warn").map((f) => f.rule));
+  const missing = [...RULE_IDS].filter((id) => !covered.has(id));
+  assert.strictEqual(missing.length, 0, `rules without a fixture: ${missing.join(", ")}`);
+});
