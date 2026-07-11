@@ -40,7 +40,7 @@ npx @elevenworks/guard init
 `.claude/guard-audit.jsonl` — ein Event pro Zeile:
 
 ```json
-{"ts":"2026-07-09T14:31:02.114Z","event":"blocked","type":"path","tool":"Read","target":".env","rule":"**/.env"}
+{"ts":"2026-07-09T14:31:02.114Z","event":"blocked","type":"path","tool":"Read","target":".env","ruleId":"path.dotenv","rule":"**/.env"}
 ```
 
 In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
@@ -49,7 +49,7 @@ In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
 
 - **Hooks sind eine Schutzschicht, keine Sandbox.** Wer Claude Code mit `--dangerously-skip-permissions` und ohne Hooks startet, umgeht alles. guard schützt vor Versehen und Injection-Mustern — für harte Isolation gehört eine Container-/Egress-Schicht dazu.
 - **PII-Erkennung ist Regex-basiert.** Sie fängt strukturierte Muster (IBAN, Keys, E-Mail), keine Freitext-Namen. Für echte Datenbank-Arbeit: [doppel].
-- **Dynamisch zusammengebaute Pfade entkommen der Denylist.** Wer einen Secret-Pfad zur Laufzeit zusammensetzt (`open('.e'+'nv')`, `f=.en; cat ${f}v`), umgeht die statische Muster-Erkennung. Das ist eine prinzipielle Grenze regex-basierter Denylists — im Test-Corpus als `known-gap` markiert und bewusst dokumentiert, nicht wegmarketet. Für harte Isolation gehört eine Container-/Egress-Schicht dazu.
+- **Dynamisch zusammengebaute Pfade entkommen der Denylist.** Wer einen Secret-Pfad zur Laufzeit zusammensetzt (`open('.e'+'nv')`, `f=.en; cat ${f}v`), umgeht die statische Muster-Erkennung. Das ist eine prinzipielle Grenze regex-basierter Denylists — im Testkorpus als `known-gap` markiert und bewusst dokumentiert, nicht wegmarketet. Solche Laufzeit-Konstruktionen erkennt nur eine Ausführungs-Sandbox, keine statische Regel.
 - **Fail-open bei Hook-Fehlern.** Ein kaputter Hook blockiert v0.1 nicht den Workflow. Enforce-Modus mit fail-closed kommt in v0.2.
 
 ## Lizenz
