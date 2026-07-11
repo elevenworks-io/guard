@@ -1,0 +1,5 @@
+{"desc":".env.example ist legitim","hook":"pretool","input":{"tool_name":"Read","tool_input":{"file_path":".env.example"}},"expect":"allowed"}
+{"desc":"normale Quelldatei lesen","hook":"pretool","input":{"tool_name":"Read","tool_input":{"file_path":"src/app.js"}},"expect":"allowed"}
+{"desc":"ls ist harmlos","hook":"pretool","input":{"tool_name":"Bash","tool_input":{"command":"ls -la src"}},"expect":"allowed"}
+{"desc":"E-Mail auf Allowlist-Domain ist still","hook":"prompt","input":{"prompt":"Ticket an support@example.com"},"expect":"allowed"}
+{"desc":"harmloser Prompt","hook":"prompt","input":{"prompt":"Erkläre mir die Fehlermeldung im Checkout"},"expect":"allowed"}

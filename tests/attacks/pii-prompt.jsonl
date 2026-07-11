@@ -1,0 +1,9 @@
+{"desc":"IBAN im Prompt blockt","hook":"prompt","input":{"prompt":"Überweisung an DE44500105175407324931 bitte"},"expect":"blocked","rule":"pii.iban"}
+{"desc":"AWS Key im Prompt blockt","hook":"prompt","input":{"prompt":"Key ist AKIAIOSFODNN7EXAMPLE"},"expect":"blocked","rule":"pii.aws-key"}
+{"desc":"Private Key Block im Prompt blockt","hook":"prompt","input":{"prompt":"-----BEGIN RSA PRIVATE KEY-----"},"expect":"blocked","rule":"pii.private-key"}
+{"desc":"JWT im Prompt blockt","hook":"prompt","input":{"prompt":"token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"},"expect":"blocked","rule":"pii.jwt"}
+{"desc":"Anthropic Key im Prompt blockt","hook":"prompt","input":{"prompt":"sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA"},"expect":"blocked","rule":"pii.anthropic-key"}
+{"desc":"Generischer API Key im Prompt blockt","hook":"prompt","input":{"prompt":"api_key = 'ABCDEFGHIJKLMNOP1234'"},"expect":"blocked","rule":"pii.generic-api-key"}
+{"desc":"E-Mail warnt","hook":"prompt","input":{"prompt":"Schreib eine Mail an max@kunde.de"},"expect":"warn","rule":"pii.email"}
+{"desc":"Telefonnummer warnt","hook":"prompt","input":{"prompt":"Ruf 0171 1234567 an"},"expect":"warn","rule":"pii.phone-de"}
+{"desc":"Steuer-ID warnt","hook":"prompt","input":{"prompt":"Steuer-ID 12 345 678 901"},"expect":"warn","rule":"pii.steuer-id"}
