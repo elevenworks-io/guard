@@ -4,8 +4,7 @@
   "mode": "enforce",
 
   "allowPaths": [
-    "**/.env.example", "**/.env.sample", "**/.env.template", "**/.env.dist",
-    "**/*.example", "**/*.sample", "**/*.template", "**/*.dist"
+    "**/.env.example", "**/.env.sample", "**/.env.template", "**/.env.dist"
   ],
 
   "blockedPaths": [
