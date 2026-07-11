@@ -1,0 +1,92 @@
+// @elevenworks/guard — shared hook library
+// Hooks kommunizieren mit Claude Code über stdin (JSON) und Exit-Codes:
+//   exit 0 = erlaubt, exit 2 = blockiert (stderr wird Claude als Begründung gezeigt)
+"use strict";
+const fs = require("fs");
+const path = require("path");
+
+function readStdin() {
+  try {
+    return JSON.parse(fs.readFileSync(0, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function loadRules(cwd) {
+  const candidates = [
+    path.join(cwd || process.cwd(), "guard.rules.json"),
+    path.join(cwd || process.cwd(), ".claude", "guard.rules.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch (e) {
+      process.stderr.write(`[guard] Regel-Datei fehlerhaft: ${p} — ${e.message}\n`);
+    }
+  }
+  return null;
+}
+
+// Minimaler Glob-Matcher: unterstützt ** und * (reicht für Pfad-Denylists)
+function globToRegex(glob) {
+  const esc = glob
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "§§DOUBLE§§")
+    .replace(/\*/g, "[^/]*")
+    .replace(/§§DOUBLE§§/g, ".*");
+  return new RegExp("(^|/)" + esc + "$");
+}
+
+function pathBlocked(filePath, rules) {
+  if (!filePath || !rules?.blockedPaths) return null;
+  const norm = String(filePath).replace(/\\/g, "/");
+  for (const glob of rules.blockedPaths) {
+    if (globToRegex(glob).test(norm)) return glob;
+  }
+  return null;
+}
+
+function commandBlocked(command, rules) {
+  if (!command || !rules?.blockedCommands) return null;
+  for (const rule of rules.blockedCommands) {
+    try {
+      const re = new RegExp(rule.pattern, rule.flags || "");
+      if (re.test(command)) return rule;
+    } catch { /* fehlerhafte Regel überspringen */ }
+  }
+  return null;
+}
+
+function scanPII(text, rules) {
+  const hits = [];
+  if (!text || !rules?.piiPatterns) return hits;
+  for (const p of rules.piiPatterns) {
+    try {
+      const re = new RegExp(p.pattern, (p.flags || "") + "g");
+      const matches = text.match(re) || [];
+      for (const m of matches) {
+        if (p.allowDomains && p.allowDomains.some((d) => m.toLowerCase().endsWith("@" + d) || m.toLowerCase().endsWith("." + d))) continue;
+        hits.push({ name: p.name, action: p.action || "warn", sample: mask(m) });
+      }
+    } catch { /* fehlerhafte Regel überspringen */ }
+  }
+  return hits;
+}
+
+function mask(s) {
+  if (s.length <= 6) return "***";
+  return s.slice(0, 3) + "…" + s.slice(-2) + ` (${s.length} Zeichen)`;
+}
+
+function audit(event, rules, cwd) {
+  try {
+    if (rules?.audit?.enabled === false) return;
+    const rel = rules?.audit?.path || ".claude/guard-audit.jsonl";
+    const p = path.isAbsolute(rel) ? rel : path.join(cwd || process.cwd(), rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.appendFileSync(p, JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n");
+  } catch { /* Audit darf den Workflow nie crashen */ }
+}
+
+module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, scanPII, audit };

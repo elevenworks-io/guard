@@ -1,0 +1,26 @@
+{
+  "name": "@elevenworks/guard",
+  "version": "0.1.0",
+  "description": "Der Sicherheitsgurt für Claude Code. Secret-Blocker, Command-Denylist, PII-Erkennung, Audit-Log.",
+  "bin": {
+    "guard": "bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "hooks",
+    "templates",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "hooks",
+    "security",
+    "dsgvo",
+    "guardrails"
+  ],
+  "author": "elevenworks",
+  "license": "MIT"
+}
