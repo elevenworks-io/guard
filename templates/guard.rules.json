@@ -52,8 +52,8 @@
     { "id": "inj.ignore-previous", "pattern": "ignor\\w*\\s+(all\\s+)?(previous|prior|above|vorherig\\w*|vorig\\w*)\\s+(instruction|anweisung|prompt)", "flags": "i" },
     { "id": "inj.disregard", "pattern": "disregard\\s+(the\\s+|all\\s+)?(previous|above|system)", "flags": "i" },
     { "id": "inj.system-override", "pattern": "<!--\\s*system:|^\\s*system\\s*:\\s*(ignore|ignoriere|du bist|you are now)", "flags": "im" },
-    { "id": "inj.read-secret", "pattern": "(lies|read|cat|print|poste?|send)\\b[^\\n]{0,40}\\.(env|pem|key)\\b", "flags": "i" },
-    { "id": "inj.exfiltrate", "pattern": "(post|send|schick|exfiltr|leak)\\w*\\s+[^\\n]{0,40}(inhalt|content|secret|token|credential|zugangsdat)", "flags": "i" }
+    { "id": "inj.read-secret", "pattern": "(lies|read|cat|print|poste?|send)\\b[^\\n]{0,40}\\.env\\b", "flags": "i" },
+    { "id": "inj.exfiltrate", "pattern": "(post|send|schick|exfiltr|leak)\\w*\\s+[^\\n]{0,40}(\\binhalt\\b|content|secret|token|credential|zugangsdat)", "flags": "i" }
   ],
 
   "piiPatterns": [

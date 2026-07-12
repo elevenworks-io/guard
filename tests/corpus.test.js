@@ -69,7 +69,7 @@ test("meta: fixtures reference only existing rule ids", () => {
   }
 });
 test("meta: rule ids are unique", () => {
-  const all = [...(RULES.blockedPaths || []), ...(RULES.blockedCommands || []), ...(RULES.piiPatterns || [])].map((r) => r.id);
+  const all = [...(RULES.blockedPaths || []), ...(RULES.blockedCommands || []), ...(RULES.piiPatterns || []), ...(RULES.injectionPatterns || [])].map((r) => r.id);
   assert.strictEqual(all.length, new Set(all).size, "duplicate rule id");
 });
 test("meta: every rule id is covered by >=1 blocked/warn/injection fixture", () => {
