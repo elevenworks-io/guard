@@ -8,6 +8,7 @@
   "files": [
     "bin",
     "hooks",
+    "lib",
     "templates",
     "README.md"
   ],

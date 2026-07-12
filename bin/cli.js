@@ -112,12 +112,35 @@ function status() {
   console.log("");
 }
 
+function report() {
+  const rules = loadRulesFile();
+  if (!rules) {
+    console.log(`\n  ${c.red("✕")} Kein guard.rules.json gefunden. Erst ${c.bold("guard init")} ausführen.\n`);
+    process.exit(1);
+  }
+  const auditPath = path.join(CWD, rules.audit?.path || ".claude/guard-audit.jsonl");
+  let auditLines = [];
+  if (fs.existsSync(auditPath)) {
+    auditLines = fs.readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean).map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+  }
+  const { buildReport } = require("../lib/report.js");
+  const md = buildReport({ auditLines, rules, now: new Date().toISOString() });
+  const out = path.join(CWD, "guard-report.md");
+  fs.writeFileSync(out, md);
+  console.log(md);
+  console.log(c.dim(`\n  → auch geschrieben nach guard-report.md\n`));
+}
+
 const cmd = process.argv[2];
 if (cmd === "init") init();
 else if (cmd === "status") status();
+else if (cmd === "report") report();
 else {
   console.log(`\n  ${c.bold("@elevenworks/guard")} — Der Sicherheitsgurt für Claude Code\n`);
   console.log("  Befehle:");
   console.log("    guard init     Hooks + Regelwerk im aktuellen Projekt installieren");
-  console.log("    guard status   Aktive Regeln und Audit-Zusammenfassung anzeigen\n");
+  console.log("    guard status   Aktive Regeln und Audit-Zusammenfassung anzeigen");
+  console.log("    guard report   Nachweis aus dem Audit-Log erzeugen\n");
 }
