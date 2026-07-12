@@ -20,7 +20,7 @@ test("report has title, counts, grouped blocks, active rules", () => {
   assert.match(md, /2 blockiert/);                 // 2 blocked events
   assert.match(md, /path\.dotenv/);                // grouped by ruleId
   assert.match(md, /cmd\.rm-rf/);
-  assert.match(md, /44|Regeln aktiv|3 Regeln/);    // active rule count reflected
+  assert.match(md, /Regeln aktiv:\*\* 3/);         // active rule count actually computed (3 rules in fixture)
   assert.match(md, /10:00/);                        // session start
 });
 test("empty audit yields honest empty report", () => {
