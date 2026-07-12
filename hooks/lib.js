@@ -92,6 +92,17 @@ function scanPII(text, rules) {
   return hits;
 }
 
+function scanInjection(text, rules) {
+  const hits = [];
+  if (!text || !rules?.injectionPatterns) return hits;
+  for (const p of rules.injectionPatterns) {
+    try {
+      if (new RegExp(p.pattern, p.flags || "").test(text)) hits.push({ ruleId: p.id, name: p.id });
+    } catch { /* fehlerhafte Regel überspringen */ }
+  }
+  return hits;
+}
+
 function mask(s) {
   if (s.length <= 6) return "***";
   return s.slice(0, 3) + "…" + s.slice(-2) + ` (${s.length} Zeichen)`;
@@ -107,4 +118,4 @@ function audit(event, rules, cwd) {
   } catch { /* Audit darf den Workflow nie crashen */ }
 }
 
-module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, audit };
+module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit };
