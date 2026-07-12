@@ -8,7 +8,7 @@ const { runFixture, collectRuleIds } = require("./runner.js");
 const ATTACK_DIR = path.join(__dirname, "attacks");
 const RULES = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "templates", "guard.rules.json"), "utf8"));
 const RULE_IDS = collectRuleIds(RULES);
-const VALID_EXPECT = new Set(["blocked", "allowed", "warn", "known-gap"]);
+const VALID_EXPECT = new Set(["blocked", "allowed", "warn", "known-gap", "injection"]);
 
 function loadFixtures() {
   const out = [];
@@ -37,6 +37,12 @@ function evaluate(fx, r) {
     assert.ok(ev, `no "warned" audit event for "${fx.desc}"`);
     assert.ok((ev.findings || []).some((f) => f.ruleId === fx.rule), `wrong warn rule for "${fx.desc}"`);
     assert.ok(r.stdout.includes("[guard]"), `no stdout hint for "${fx.desc}"`);
+  } else if (fx.expect === "injection") {
+    assert.strictEqual(r.exitCode, 0, `detector must not block "${fx.desc}"`);
+    const ev = r.auditEvents.find((e) => e.event === "injection-detected");
+    assert.ok(ev, `no "injection-detected" audit event for "${fx.desc}"`);
+    assert.ok((ev.findings || []).some((f) => f.ruleId === fx.rule), `wrong injection rule for "${fx.desc}"`);
+    assert.match(r.stdout, /injection|Injection/, `expected a warning in stdout for "${fx.desc}"`);
   } else if (fx.expect === "known-gap") {
     if (r.exitCode === 2) {
       throw new Error(`GAP CLOSED: ${fx.desc} — Fixture auf "blocked" umstellen und die README-Grenze streichen.`);
@@ -54,7 +60,7 @@ for (const fx of fixtures) {
 test("meta: every fixture schema is valid", () => {
   for (const fx of fixtures) {
     assert.ok(fx.desc && fx.hook && fx.input && VALID_EXPECT.has(fx.expect), `invalid fixture [${fx.file}:${fx.lineNo}]`);
-    if (fx.expect === "blocked" || fx.expect === "warn") assert.ok(fx.rule, `missing rule id [${fx.file}:${fx.lineNo}]`);
+    if (fx.expect === "blocked" || fx.expect === "warn" || fx.expect === "injection") assert.ok(fx.rule, `missing rule id [${fx.file}:${fx.lineNo}]`);
   }
 });
 test("meta: fixtures reference only existing rule ids", () => {
@@ -66,8 +72,8 @@ test("meta: rule ids are unique", () => {
   const all = [...(RULES.blockedPaths || []), ...(RULES.blockedCommands || []), ...(RULES.piiPatterns || [])].map((r) => r.id);
   assert.strictEqual(all.length, new Set(all).size, "duplicate rule id");
 });
-test("meta: every rule id is covered by >=1 blocked/warn fixture", () => {
-  const covered = new Set(fixtures.filter((f) => f.expect === "blocked" || f.expect === "warn").map((f) => f.rule));
+test("meta: every rule id is covered by >=1 blocked/warn/injection fixture", () => {
+  const covered = new Set(fixtures.filter((f) => ["blocked", "warn", "injection"].includes(f.expect)).map((f) => f.rule));
   const missing = [...RULE_IDS].filter((id) => !covered.has(id));
   assert.strictEqual(missing.length, 0, `rules without a fixture: ${missing.join(", ")}`);
 });

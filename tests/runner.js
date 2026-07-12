@@ -8,7 +8,7 @@ const HOOKS_DIR = path.join(__dirname, "..", "hooks");
 const RULES_SRC = path.join(__dirname, "..", "templates", "guard.rules.json");
 
 function runFixture(fixture) {
-  const hookFile = fixture.hook === "prompt" ? "prompt.js" : "pretool.js";
+  const hookFile = fixture.hook === "prompt" ? "prompt.js" : fixture.hook === "posttool" ? "posttool.js" : "pretool.js";
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-fix-"));
   try {
     fs.copyFileSync(RULES_SRC, path.join(dir, "guard.rules.json"));
@@ -33,6 +33,7 @@ function collectRuleIds(rules) {
   for (const r of rules.blockedPaths || []) ids.add(r.id);
   for (const r of rules.blockedCommands || []) ids.add(r.id);
   for (const r of rules.piiPatterns || []) ids.add(r.id);
+  for (const r of rules.injectionPatterns || []) ids.add(r.id);
   return ids;
 }
 
