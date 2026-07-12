@@ -14,6 +14,13 @@ const audit = [
   { ts: "2026-07-11T10:02:00.000Z", event: "allowed", tool: "Read", target: "src/app.js" },
 ];
 
+test("report counts injection-detected events in the summary", () => {
+  const withInjection = [...audit, { ts: "2026-07-11T10:03:00.000Z", event: "injection-detected", tool: "Read", target: "README.md", findings: [{ ruleId: "inj.system-override" }] }];
+  const md = buildReport({ auditLines: withInjection, rules: { ...rules, injectionPatterns: [{ id: "inj.system-override", pattern: "z" }] }, now: "2026-07-11T10:05:00.000Z" });
+  assert.match(md, /1 Injection erkannt/);
+  assert.match(md, /Injection-Muster: 1/);
+  assert.match(md, /Regeln aktiv:\*\* 4/); // 1 path + 1 cmd + 1 pii + 1 injection
+});
 test("report has title, counts, grouped blocks, active rules", () => {
   const md = buildReport({ auditLines: audit, rules, now: "2026-07-11T10:05:00.000Z" });
   assert.match(md, /# guard — Nachweis/);
