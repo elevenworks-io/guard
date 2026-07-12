@@ -23,7 +23,8 @@ function countRules(rules) {
   return (
     (rules.blockedPaths?.length || 0) +
     (rules.blockedCommands?.length || 0) +
-    (rules.piiPatterns?.length || 0)
+    (rules.piiPatterns?.length || 0) +
+    (rules.injectionPatterns?.length || 0)
   );
 }
 
@@ -103,12 +104,15 @@ function status() {
   console.log(`  Geschützte Pfade:   ${rules.blockedPaths?.length || 0}`);
   console.log(`  Kommando-Regeln:    ${rules.blockedCommands?.length || 0}`);
   console.log(`  PII-Muster:         ${rules.piiPatterns?.length || 0}`);
+  console.log(`  Injection-Muster:   ${rules.injectionPatterns?.length || 0}`);
   console.log(`  ${c.green(c.bold(`✓ ${countRules(rules)} Regeln aktiv`))}`);
   const auditPath = path.join(CWD, rules.audit?.path || ".claude/guard-audit.jsonl");
   if (fs.existsSync(auditPath)) {
     const lines = fs.readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean);
     const blocked = lines.filter((l) => l.includes('"blocked"')).length;
-    console.log(`  Audit-Events:       ${lines.length} gesamt, ${blocked} blockiert`);
+    const would = lines.filter((l) => l.includes('"would-block"')).length;
+    const suffix = would ? `, ${would} würde-blockiert (monitor)` : "";
+    console.log(`  Audit-Events:       ${lines.length} gesamt, ${blocked} blockiert${suffix}`);
   }
   console.log("");
 }

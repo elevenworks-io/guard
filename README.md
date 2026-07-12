@@ -4,7 +4,7 @@ Der Sicherheitsgurt für Claude Code. Secret-Blocker, Command-Denylist, PII-Erke
 
 ```
 npx @elevenworks/guard init
-✓ 44 Regeln aktiv
+✓ 49 Regeln aktiv
 ```
 
 ## Was guard macht
@@ -45,6 +45,21 @@ npx @elevenworks/guard init
 ```
 
 In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
+
+## Modus: enforce vs. monitor
+
+`guard.rules.json` steuert per `"mode"`, ob eine Übereinstimmung tatsächlich blockiert oder nur protokolliert wird:
+
+```json
+{ "mode": "enforce" }
+```
+
+- **`enforce`** (Default) — geschützte Pfade und gefährliche Kommandos werden blockiert (Exit 2), Claude bekommt die Begründung und muss eine sichere Alternative wählen.
+- **`monitor`** — nichts wird blockiert. Jede Übereinstimmung, die im `enforce`-Modus geblockt worden wäre, wird stattdessen als `would-block` ins Audit-Log geschrieben und das Tool läuft durch (Exit 0). `guard status` und `guard report` zeigen diese würde-blockiert-Zahl getrennt von den tatsächlich blockierten Events.
+
+`monitor` ist **audit-only** — reines Beobachten, kein Schutz. Es existiert als Adoptionspfad: Teams, die guard neu einführen, können erst sehen, welche Regeln in ihrer Codebasis überhaupt greifen würden (False-Positives, unerwartete Treffer), bevor sie scharf schalten. Für den eigentlichen Schutz gehört `enforce` production-seitig gesetzt.
+
+Die Injection-Erkennung (`PostToolUse`) ist von diesem Schalter unabhängig — sie **blockt nie**, in keinem Modus, sondern warnt nur (siehe „Ehrliche Grenzen" unten). `mode` betrifft ausschließlich die Durchsetzung von Pfad- und Kommando-Regeln in `pretool.js`.
 
 ## Ehrliche Grenzen (v0.1)
 
