@@ -61,12 +61,12 @@ In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
 
 Die Injection-Erkennung (`PostToolUse`) ist von diesem Schalter unabhängig — sie **blockt nie**, in keinem Modus, sondern warnt nur (siehe „Ehrliche Grenzen" unten). `mode` betrifft ausschließlich die Durchsetzung von Pfad- und Kommando-Regeln in `pretool.js`.
 
-## Ehrliche Grenzen (v0.1)
+## Ehrliche Grenzen
 
 - **Hooks sind eine Schutzschicht, keine Sandbox.** Wer Claude Code mit `--dangerously-skip-permissions` und ohne Hooks startet, umgeht alles. guard schützt vor Versehen und Injection-Mustern — für harte Isolation gehört eine Container-/Egress-Schicht dazu.
 - **PII-Erkennung ist Regex-basiert.** Sie fängt strukturierte Muster (IBAN, Keys, E-Mail), keine Freitext-Namen. Für echte Datenbank-Arbeit: [doppel].
 - **Dynamisch zusammengebaute Pfade entkommen der Denylist.** Wer einen Secret-Pfad zur Laufzeit zusammensetzt (`open('.e'+'nv')`, `f=.en; cat ${f}v`), umgeht die statische Muster-Erkennung. Das ist eine prinzipielle Grenze regex-basierter Denylists — im Testkorpus als `known-gap` markiert und bewusst dokumentiert, nicht wegmarketet. Solche Laufzeit-Konstruktionen erkennt nur eine Ausführungs-Sandbox, keine statische Regel.
-- **Fail-open bei Hook-Fehlern.** Ein kaputter Hook blockiert v0.1 nicht den Workflow. Enforce-Modus mit fail-closed kommt in v0.2.
+- **Fail-open bei Hook-Fehlern.** Ein Hook, der abstürzt oder fehlerhaften Input bekommt, lässt den Workflow bewusst durch (Exit 0), statt ihn zu blockieren — guard soll nie zwischen Claude und die eigentliche Arbeit treten. Der Preis dieser Entscheidung: ein Hook, der nicht läuft, schützt in diesem Moment auch nicht.
 - **Injection-Erkennung ist eine Heuristik, keine Garantie.** Sie fängt bekannte Phrasen (`ignore previous instructions`, `<!-- SYSTEM: ... -->`, …) im gelesenen Inhalt und **warnt** — sie **blockt nicht**, weil Claude den legitimen Inhalt trotzdem braucht (z. B. die echte Bug-Beschreibung in derselben Datei). Umschriebene/paraphrasierte Injektionen entkommen der Phrasenliste (im Testkorpus als `known-gap` markiert). Der harte Schutz bleibt die geblockte Folgeaktion: selbst wenn eine Injection Claude dazu bringt, ein Secret lesen oder senden zu wollen, blockiert `pretool.js` das tatsächlich.
 
 ## Lizenz
