@@ -34,3 +34,14 @@ test("empty audit yields honest empty report", () => {
   const md = buildReport({ auditLines: [], rules, now: "2026-07-11T10:05:00.000Z" });
   assert.match(md, /0 blockiert/);
 });
+test("report contrasts would-block (monitor) events", () => {
+  const monitorAudit = [
+    { ts: "2026-07-11T10:00:00.000Z", event: "would-block", type: "path", tool: "Read", target: ".env", ruleId: "path.dotenv" },
+    { ts: "2026-07-11T10:01:00.000Z", event: "would-block", type: "command", tool: "Bash", command: "cat .env", ruleId: "cmd.cat-secret" },
+  ];
+  const md = buildReport({ auditLines: monitorAudit, rules: { ...rules, mode: "monitor", blockedCommands: [{ id: "cmd.cat-secret", pattern: "x" }] }, now: "2026-07-11T10:05:00.000Z" });
+  assert.match(md, /0 blockiert/);                              // im monitor wurde nichts durchgesetzt
+  assert.match(md, /2 würde-blockiert|2 erkannt/);             // Kontrast-Zahl
+  assert.match(md, /Nicht durchgesetzt \(monitor-Modus\)/);    // Kontrast-Sektion
+  assert.match(md, /path\.dotenv/);                            // gruppiert nach Regel
+});
