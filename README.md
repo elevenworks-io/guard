@@ -14,6 +14,7 @@ npx @elevenworks/guard init
 | Secrets unsichtbar | `.env`, Keys, Credentials — Lese-Zugriff wird blockiert | PreToolUse |
 | Gefährliche Kommandos | `rm -rf`, Force-Push, `curl \| sh`, `DROP TABLE`, … | PreToolUse |
 | PII-Erkennung | E-Mail, IBAN, Steuer-ID, API-Keys im Prompt | UserPromptSubmit |
+| Injection-Erkennung | Muster im gelesenen Inhalt | PostToolUse |
 | Audit-Log | Jede Entscheidung als JSONL, revisionsfähig | alle |
 
 ## Wie es funktioniert
@@ -51,6 +52,7 @@ In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
 - **PII-Erkennung ist Regex-basiert.** Sie fängt strukturierte Muster (IBAN, Keys, E-Mail), keine Freitext-Namen. Für echte Datenbank-Arbeit: [doppel].
 - **Dynamisch zusammengebaute Pfade entkommen der Denylist.** Wer einen Secret-Pfad zur Laufzeit zusammensetzt (`open('.e'+'nv')`, `f=.en; cat ${f}v`), umgeht die statische Muster-Erkennung. Das ist eine prinzipielle Grenze regex-basierter Denylists — im Testkorpus als `known-gap` markiert und bewusst dokumentiert, nicht wegmarketet. Solche Laufzeit-Konstruktionen erkennt nur eine Ausführungs-Sandbox, keine statische Regel.
 - **Fail-open bei Hook-Fehlern.** Ein kaputter Hook blockiert v0.1 nicht den Workflow. Enforce-Modus mit fail-closed kommt in v0.2.
+- **Injection-Erkennung ist eine Heuristik, keine Garantie.** Sie fängt bekannte Phrasen (`ignore previous instructions`, `<!-- SYSTEM: ... -->`, …) im gelesenen Inhalt und **warnt** — sie **blockt nicht**, weil Claude den legitimen Inhalt trotzdem braucht (z. B. die echte Bug-Beschreibung in derselben Datei). Umschriebene/paraphrasierte Injektionen entkommen der Phrasenliste (im Testkorpus als `known-gap` markiert). Der harte Schutz bleibt die geblockte Folgeaktion: selbst wenn eine Injection Claude dazu bringt, ein Secret lesen oder senden zu wollen, blockiert `pretool.js` das tatsächlich.
 
 ## Lizenz
 

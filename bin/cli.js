@@ -39,7 +39,7 @@ function init() {
 
   // 1) Hook-Scripts kopieren
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
-  for (const f of ["lib.js", "pretool.js", "prompt.js"]) {
+  for (const f of ["lib.js", "pretool.js", "prompt.js", "posttool.js"]) {
     fs.copyFileSync(path.join(PKG_ROOT, "hooks", f), path.join(HOOKS_DIR, f));
   }
   console.log(`  ${c.green("✓")} Hook-Scripts → ${c.dim(".claude/hooks/guard/")}`);
@@ -69,13 +69,14 @@ function init() {
     const exists = JSON.stringify(settings.hooks[event]).includes("hooks/guard/");
     if (!exists) {
       settings.hooks[event].push({
-        matcher: event === "PreToolUse" ? "*" : undefined,
+        matcher: event === "PreToolUse" ? "*" : event === "PostToolUse" ? "Read|Bash" : undefined,
         hooks: [{ type: "command", command }],
       });
     }
   };
   ensureHook("PreToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/pretool.js"');
   ensureHook("UserPromptSubmit", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/prompt.js"');
+  ensureHook("PostToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/posttool.js"');
 
   fs.mkdirSync(CLAUDE_DIR, { recursive: true });
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2));
