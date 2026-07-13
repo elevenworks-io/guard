@@ -116,6 +116,21 @@ test("verify: monitor-Modus → erkennt statt blockt, gilt als ok", () => {
   cleanup(d);
 });
 
+// Fund #2 / Verdrahtung: eine action:"block"-PII-Regel muss auch im monitor
+// als probiert zählen — sie feuert dort would-block (nicht blocked). Ohne die
+// mode-abhängige Erwartung in probeRule würde pii.iban im monitor fälschlich
+// als "greift nicht auf ihr Testmuster" gemeldet.
+test("verify: monitor + block-PII-Regel (pii.iban) → über would-block probiert, ok:true", () => {
+  const d = smallInstall({ mode: "monitor", ids: ["path.dotenv", "cmd.rm-rf", "pii.iban", "inj.ignore-previous"] });
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.mode, "monitor");
+  assert.strictEqual(r.coverage.probed, 4, "alle vier Regeln probiert (pii.iban via would-block)");
+  const piiDetail = r.details.find((dt) => dt.key === "class:piiPatterns");
+  assert.ok(piiDetail && piiDetail.ok, "PII-Klasse muss grün sein");
+  cleanup(d);
+});
+
 test("verify: fasst das echte Audit-Log NICHT an (Compliance-Trail sauber)", () => {
   const d = smallInstall();
   const auditPath = path.join(d, ".claude", "guard-audit.jsonl");
@@ -627,5 +642,40 @@ test("A11: \"disableAllHooks\": true in settings.json (sonst kanonische Verdraht
   assert.ok(wiringDetail);
   assert.strictEqual(wiringDetail.ok, false);
   assert.match(wiringDetail.info, /disableAllHooks/);
+  cleanup(d);
+});
+
+// Fund A: der eigentliche Angriff. Projekt-settings.json ist tadellos verdrahtet,
+// aber .claude/settings.local.json (HÖHERE Präzedenz, meist gitignored) schaltet
+// per disableAllHooks alle Hooks ab. verify las bisher nur die Projekt-Datei und
+// hätte grün gemeldet + gesiegelt — ein Siegel für einen Guard, den Claude Code
+// nie aufruft.
+test("A12: \"disableAllHooks\": true in settings.local.json (Projekt kanonisch) → ok:false, Meldung nennt settings.local.json", () => {
+  const d = smallInstall();
+  fs.writeFileSync(path.join(d, ".claude", "settings.local.json"), JSON.stringify({ disableAllHooks: true }, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail);
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /settings\.local\.json/);
+  cleanup(d);
+});
+
+// Präzedenz-Gegenprobe: Projekt setzt disableAllHooks:true, aber die höher-
+// präzedente Local-Datei setzt es explizit auf false → Hooks laufen → grün.
+test("A13: settings.local.json disableAllHooks:false hebt Projekt-true auf → ok:true", () => {
+  const d = smallInstall();
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  settings.disableAllHooks = true;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  fs.writeFileSync(path.join(d, ".claude", "settings.local.json"), JSON.stringify({ disableAllHooks: false }, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, true);
   cleanup(d);
 });

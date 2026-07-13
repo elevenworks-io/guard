@@ -147,11 +147,19 @@ function realRoot(cwd) {
 
 // Nur die guard-relevanten Hook-Registrierungen aus settings.json — fremde
 // Einträge (andere Tools, env-Vars) dürfen das Siegel nicht invalidieren.
+// Robust gegen handgeschriebene/kaputte settings.json: ein `hooks.<Event>`,
+// das KEIN Array ist (Objekt/String/Zahl), oder ein `entry.hooks`, das kein
+// Array ist, wird übersprungen statt geworfen — sonst propagiert ein TypeError
+// bis in bin/cli.js und wird dort fälschlich als "Tmpdir nicht schreibbar"
+// ausgewiesen (checkWiring ruft diese Funktion außerhalb seines try/catch).
 function guardHookEntries(settings) {
   const out = [];
-  for (const [event, arr] of Object.entries(settings?.hooks || {})) {
-    for (const entry of arr || []) {
-      const commands = (entry.hooks || [])
+  const hooks = settings && typeof settings.hooks === "object" && settings.hooks !== null ? settings.hooks : {};
+  for (const [event, arr] of Object.entries(hooks)) {
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      if (!entry || typeof entry !== "object") continue;
+      const commands = (Array.isArray(entry.hooks) ? entry.hooks : [])
         .map((h) => h && h.command)
         .filter((c) => typeof c === "string" && c.includes("hooks/guard/"))
         .sort();
@@ -160,6 +168,54 @@ function guardHookEntries(settings) {
   }
   out.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   return out;
+}
+
+// Wo Claude Code die managed (enterprise) settings sucht — plattformabhängig,
+// laut offizieller Doku. Best-effort; existiert die Datei nicht, trägt der
+// Scope schlicht nichts bei.
+function managedSettingsPath() {
+  if (process.platform === "darwin") return "/Library/Application Support/ClaudeCode/managed-settings.json";
+  if (process.platform === "win32") return path.join(process.env.PROGRAMDATA || "C:\\ProgramData", "ClaudeCode", "managed-settings.json");
+  return "/etc/claude-code/managed-settings.json";
+}
+
+// Die Settings-Scopes, die Claude Code merged — von HÖCHSTER zu niedrigster
+// Präzedenz (Managed → Local → Project → User; CLI-Args liegen dazwischen,
+// sind aber aus einer Datei nicht sichtbar). Für einen SKALAREN Key wie
+// disableAllHooks gewinnt der höchste Scope, der ihn DEFINIERT.
+function settingsScopePaths(cwd) {
+  const root = cwd || process.cwd();
+  return [
+    { scope: "managed", path: managedSettingsPath() },
+    { scope: "local", path: path.join(root, ".claude", "settings.local.json") },
+    { scope: "project", path: path.join(root, ".claude", "settings.json") },
+    { scope: "user", path: path.join(os.homedir(), ".claude", "settings.json") },
+  ];
+}
+
+// Löst den effektiven Wert von "disableAllHooks" über ALLE Scopes auf, die
+// Claude Code merged — nicht nur die Projekt-Datei. Ein `disableAllHooks: true`
+// in .claude/settings.local.json (höhere Präzedenz als Projekt, meist
+// gitignored) oder in ~/.claude/settings.json (User-Scope) schaltet JEDEN Hook
+// global ab; guard läuft dann in einer echten Session nicht, obwohl seine
+// Registrierung in der Projekt-Datei tadellos ist. `verify` MUSS das sehen,
+// sonst siegelt es einen Guard, den Claude Code nie aufruft.
+//
+// opts.scopes erlaubt Tests, die Scope-Dateien explizit zu setzen (statt das
+// echte ~/.claude / managed zu lesen). Darf NIE werfen — eine kaputte
+// Scope-Datei trägt einfach nichts bei.
+function resolveDisableAllHooks(cwd, opts) {
+  const scopes = (opts && Array.isArray(opts.scopes)) ? opts.scopes : settingsScopePaths(cwd);
+  for (const { scope, path: p } of scopes) {
+    let settings = null;
+    try {
+      settings = JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch { continue; /* Datei fehlt/kaputt → dieser Scope definiert den Key nicht */ }
+    if (settings && typeof settings.disableAllHooks === "boolean") {
+      return { disabled: settings.disableAllHooks, scope };
+    }
+  }
+  return { disabled: false, scope: null };
 }
 
 // Fingerabdruck über Verdrahtung + Regeln + Hook-Skripte.
@@ -233,9 +289,32 @@ function machineId() {
   try {
     const dir = machineIdDir();
     const file = path.join(dir, "machine-id");
+    const homeDir = path.join(os.homedir(), ".config", "elevenworks-guard");
+    const homeFile = path.join(homeDir, "machine-id");
+
+    // Spiegelt eine unter XDG liegende ID an den HOME-Fallback, falls dort noch
+    // KEINE liegt. Fail-open und NICHT-überschreibend — eine bereits am HOME
+    // liegende (evtl. divergente) ID wird nie geklobbert, die primäre ID nie
+    // kaputt gemacht. Wird auf BEIDEN Wegen aufgerufen: beim Neu-Minten UND
+    // beim Lesen einer bereits existierenden XDG-ID. Letzteres deckt eine ID
+    // ab, die eine ÄLTERE Version (vor dem Spiegel) XDG-only angelegt hat —
+    // ohne diesen Aufruf am Lese-Pfad bliebe ein Leser ohne XDG_CONFIG_HOME
+    // für immer bei einer divergenten zweiten ID, das Banner bei "nicht
+    // verifiziert".
+    const mirrorToHome = (id) => {
+      if (!process.env.XDG_CONFIG_HOME || dir === homeDir) return;
+      try {
+        if (fs.readFileSync(homeFile, "utf8").trim()) return; // HOME hat schon eine ID — nicht anfassen
+      } catch { /* HOME hat noch keine — unten anlegen */ }
+      try {
+        fs.mkdirSync(homeDir, { recursive: true });
+        fs.writeFileSync(homeFile, id + "\n");
+      } catch { /* Spiegel ist best-effort */ }
+    };
+
     try {
       const existing = fs.readFileSync(file, "utf8").trim();
-      if (existing) return existing;
+      if (existing) { mirrorToHome(existing); return existing; }
     } catch { /* noch keine Datei an diesem Pfad — unten Fallback/Neuanlage */ }
 
     // I3: Env-Divergenz. Ist XDG_CONFIG_HOME gesetzt, aber dort liegt noch
@@ -246,8 +325,6 @@ function machineId() {
     // HOME-ID sieht — zwei IDs, das Siegel passt nie zusammen, das Banner
     // bleibt für immer bei "nicht verifiziert", ohne dass der Nutzer je
     // erfährt, warum. Reines Lesen — schreibt NIE in den HOME-Fallback.
-    const homeDir = path.join(os.homedir(), ".config", "elevenworks-guard");
-    const homeFile = path.join(homeDir, "machine-id");
     if (process.env.XDG_CONFIG_HOME) {
       try {
         const existingHome = fs.readFileSync(homeFile, "utf8").trim();
@@ -264,22 +341,13 @@ function machineId() {
     // vorigen Fix: eine Shell MIT gesetztem XDG_CONFIG_HOME mintet zuerst eine
     // ID unter XDG — aber Claude Code selbst (GUI-Start, kein Shell-Profil,
     // also OHNE dieses env) sieht diese nie und mintet unabhängig eine ZWEITE
-    // ID unter ~/.config. Ergebnis: installId !== machineId() bei JEDER
-    // Session, das Banner bleibt für immer bei "nicht verifiziert", ohne
-    // jeden Hinweis. Fix: beim Neu-Minten unter XDG zusätzlich an den
+    // ID unter ~/.config. Fix: beim Neu-Minten unter XDG zusätzlich an den
     // HOME-Fallback spiegeln, damit ein Leser OHNE XDG dieselbe ID sieht.
-    // Spiegel-Schreiben bleibt fail-open — schlägt es fehl, bleibt die
-    // primäre ID trotzdem gültig zurückgegeben.
-    if (process.env.XDG_CONFIG_HOME && dir !== homeDir) {
-      try {
-        fs.mkdirSync(homeDir, { recursive: true });
-        fs.writeFileSync(homeFile, id + "\n");
-      } catch { /* Spiegel ist best-effort, darf die primäre ID nie kaputt machen */ }
-    }
+    mirrorToHome(id);
     return id;
   } catch {
     return null;
   }
 }
 
-module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit, auditPathOf, computeFingerprint, guardHookEntries, readSeal, writeSeal, SEAL_REL, HOOK_FILES, realRoot, machineId };
+module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit, auditPathOf, computeFingerprint, guardHookEntries, resolveDisableAllHooks, readSeal, writeSeal, SEAL_REL, HOOK_FILES, realRoot, machineId };

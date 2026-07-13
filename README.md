@@ -61,7 +61,7 @@ Wird von `guard init` automatisch in `.gitignore` aufgenommen (zusammen mit dem 
 
 `monitor` ist **audit-only** — reines Beobachten, kein Schutz. Es existiert als Adoptionspfad: Teams, die guard neu einführen, können erst sehen, welche Regeln in ihrer Codebasis überhaupt greifen würden (False-Positives, unerwartete Treffer), bevor sie scharf schalten. Für den eigentlichen Schutz gehört `enforce` production-seitig gesetzt.
 
-Die Injection-Erkennung (`PostToolUse`) ist von diesem Schalter unabhängig — sie **blockt nie**, in keinem Modus, sondern warnt nur (siehe „Ehrliche Grenzen" unten). `mode` betrifft ausschließlich die Durchsetzung von Pfad- und Kommando-Regeln in `pretool.js`.
+`mode` betrifft **jede** harte Durchsetzung: die Pfad- und Kommando-Regeln in `pretool.js` **und** die `action: "block"`-PII-Regeln im Prompt (`prompt.js`, z. B. IBAN oder ein API-Key im Prompt). In `monitor` schalten beide auf `would-block` (Exit 0) statt zu blocken — `monitor` blockt also wirklich nichts. Die Injection-Erkennung (`PostToolUse`) ist von diesem Schalter unabhängig, weil sie ohnehin **nie blockt**, in keinem Modus, sondern nur warnt (siehe „Ehrliche Grenzen" unten).
 
 ## Ist guard wirklich scharf? — Banner & `guard verify`
 
@@ -136,13 +136,16 @@ entschärft —, wird das Siegel ungültig und das Banner sagt es dir:
 ```
 
 **Wo guard nachsieht.** `guard init` registriert die Hooks ausschließlich in
-`.claude/settings.json` (Projektebene), und Banner wie `verify` prüfen auch
-nur dort. Hooks, die in einer anderen Settings-Ebene liegen —
-`.claude/settings.local.json` oder `~/.claude/settings.json` — sieht das
-Banner **nicht**. Das ist ein Unter-, kein Überclaim (sicher in die falsche
-Richtung), kann aber überraschen: guard läuft dann eventuell trotzdem (Claude
-Code merged alle Ebenen), das Banner meldet aber fälschlich "es wird derzeit
-NICHTS blockiert".
+`.claude/settings.json` (Projektebene); die **Registrierungs**-Prüfung von
+Banner und `verify` liest auch nur dort. Eine zusätzliche guard-Registrierung
+in einer anderen Ebene — `.claude/settings.local.json` oder
+`~/.claude/settings.json` — sieht das Banner **nicht**. Das ist ein Unter-,
+kein Überclaim (sicher in die falsche Richtung), kann aber überraschen: guard
+läuft dann eventuell trotzdem (Claude Code merged Hooks additiv über alle
+Ebenen), das Banner meldet aber fälschlich "es wird derzeit NICHTS blockiert".
+Den **Aus-Schalter** `disableAllHooks` dagegen löst `verify` sehr wohl über
+alle Ebenen nach Präzedenz auf (Managed → Local → Project → User) — ein
+`disableAllHooks: true` in irgendeiner davon macht `verify` rot, nicht grün.
 
 **Das Banner behauptet nie mehr, als getestet wurde.** Läuft guard nur im
 Beobachten-Modus, sagt es auch das — bei jedem Start:
@@ -178,7 +181,7 @@ frischt die Hooks auf und verifiziert gleich neu.
 
 ## Ehrliche Grenzen
 
-- **Hooks sind eine Schutzschicht, keine Sandbox.** `--dangerously-skip-permissions` bzw. `bypassPermissions` hebeln guard **nicht** aus: `PreToolUse`-Hooks feuern laut offizieller Claude-Code-Doku *vor* der Permission-Mode-Prüfung, ein Hook mit `permissionDecision: "deny"` blockt also auch im Bypass-Modus — mit dem echten CLI gegen einen `.env`-Read getestet und bestätigt geblockt. Ein Entwickler kann guard also nicht einfach per Flag abschalten. Was guard tatsächlich abschaltet: `"disableAllHooks": true` in `.claude/settings.json`, oder die Hooks gar nicht erst zu installieren — dann läuft guard nicht, es erscheint kein Verifizierungs-Banner beim Start (die *Abwesenheit* des Banners ist selbst das Signal), und `guard verify` schlägt jetzt bei `disableAllHooks` explizit fehl statt grün zu melden. Was guard trotzdem nicht ist: eine Sandbox. guard bewacht Claude Codes Tool-Aufrufe — nicht einen Prozess, der bereits ausgebrochen ist (z. B. beliebiger Code aus einem Build-Skript oder einer kompromittierten Abhängigkeit). Für harte Isolation gehört weiterhin eine Container-/Egress-Schicht dazu.
+- **Hooks sind eine Schutzschicht, keine Sandbox.** `--dangerously-skip-permissions` bzw. `bypassPermissions` hebeln guard **nicht** aus: guard blockt nicht über eine Permission-Entscheidung, sondern über den Hook-**Exit-Code 2** — und ein `PreToolUse`-Hook, der mit Exit 2 abbricht, stoppt den Tool-Aufruf auch im Bypass-Modus (mit dem echten CLI gegen einen `.env`-Read getestet und bestätigt geblockt). Ein Entwickler kann guard also nicht einfach per Flag abschalten. Was guard tatsächlich abschaltet: `"disableAllHooks": true` — und zwar in **jedem** settings-Scope, den Claude Code merged (Projekt `.claude/settings.json`, das höher-präzedente `.claude/settings.local.json`, oder User `~/.claude/settings.json`) —, oder die Hooks gar nicht erst zu installieren. Dann läuft guard nicht, es erscheint kein Verifizierungs-Banner beim Start (die *Abwesenheit* des Banners ist selbst das Signal), und `guard verify` löst `disableAllHooks` jetzt über alle diese Scopes auf und schlägt explizit fehl statt grün zu melden. Was guard trotzdem nicht ist: eine Sandbox. guard bewacht Claude Codes Tool-Aufrufe — nicht einen Prozess, der bereits ausgebrochen ist (z. B. beliebiger Code aus einem Build-Skript oder einer kompromittierten Abhängigkeit). Für harte Isolation gehört weiterhin eine Container-/Egress-Schicht dazu.
 - **PII-Erkennung ist Regex-basiert.** Sie fängt strukturierte Muster (IBAN, Keys, E-Mail), keine Freitext-Namen. Für echte Datenbank-Arbeit: [doppel].
 - **Dynamisch zusammengebaute Pfade entkommen der Denylist.** Wer einen Secret-Pfad zur Laufzeit zusammensetzt (`open('.e'+'nv')`, `f=.en; cat ${f}v`), umgeht die statische Muster-Erkennung. Das ist eine prinzipielle Grenze regex-basierter Denylists — im Testkorpus als `known-gap` markiert und bewusst dokumentiert, nicht wegmarketet. Solche Laufzeit-Konstruktionen erkennt nur eine Ausführungs-Sandbox, keine statische Regel.
 - **Fail-open bei Hook-Fehlern.** Ein Hook, der abstürzt oder fehlerhaften Input bekommt, lässt den Workflow bewusst durch (Exit 0), statt ihn zu blockieren — guard soll nie zwischen Claude und die eigentliche Arbeit treten. Der Preis dieser Entscheidung: ein Hook, der nicht läuft, schützt in diesem Moment auch nicht.

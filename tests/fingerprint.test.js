@@ -4,7 +4,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { computeFingerprint, guardHookEntries, HOOK_FILES } = require("../hooks/lib.js");
+const { computeFingerprint, guardHookEntries, resolveDisableAllHooks, HOOK_FILES } = require("../hooks/lib.js");
 
 const HOOKS = ["lib.js", "pretool.js", "posttool.js", "prompt.js", "session.js"];
 
@@ -113,4 +113,70 @@ test("guardHookEntries: extrahiert nur guard-Einträge, deterministisch sortiert
   });
   assert.strictEqual(entries.length, 1);
   assert.strictEqual(entries[0].event, "PreToolUse");
+});
+
+// Fund D: checkWiring ruft guardHookEntries AUSSERHALB seines try/catch — ein
+// handgeschriebenes, kaputtes settings.hooks (Nicht-Array-Wert) darf keinen
+// TypeError werfen (der in bin/cli.js als "Tmpdir nicht schreibbar"
+// fehldiagnostiziert würde), sondern muss den Eintrag überspringen.
+test("guardHookEntries: kaputte hooks-Struktur wirft nicht (überspringt)", () => {
+  assert.deepStrictEqual(guardHookEntries({ hooks: { PreToolUse: { not: "an array" } } }), []);
+  assert.deepStrictEqual(guardHookEntries({ hooks: { PreToolUse: "string" } }), []);
+  assert.deepStrictEqual(guardHookEntries({ hooks: "not an object" }), []);
+  assert.deepStrictEqual(guardHookEntries({ hooks: { PreToolUse: [null, 42, "x"] } }), []);
+  assert.deepStrictEqual(guardHookEntries({ hooks: { PreToolUse: [{ hooks: "not an array" }] } }), []);
+  assert.deepStrictEqual(guardHookEntries({}), []);
+  assert.deepStrictEqual(guardHookEntries(null), []);
+  // valider Eintrag zwischen kaputten wird trotzdem gefunden
+  const ok = guardHookEntries({
+    hooks: {
+      PreToolUse: "kaputt",
+      PostToolUse: [{ matcher: "Read|Bash", hooks: [{ type: "command", command: "node .claude/hooks/guard/posttool.js" }] }],
+    },
+  });
+  assert.strictEqual(ok.length, 1);
+  assert.strictEqual(ok[0].event, "PostToolUse");
+});
+
+// Fund A: disableAllHooks muss über ALLE Scopes nach Präzedenz aufgelöst
+// werden (Managed → Local → Project → User). Scopes werden hier explizit
+// injiziert, damit der Test nicht das echte ~/.claude / managed liest.
+test("resolveDisableAllHooks: Präzedenz Local > Project > User", () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "guard-dis-"));
+  const local = path.join(d, "local.json");
+  const project = path.join(d, "project.json");
+  const user = path.join(d, "user.json");
+  const scopesOf = () => [
+    { scope: "local", path: local },
+    { scope: "project", path: project },
+    { scope: "user", path: user },
+  ];
+  const write = (p, obj) => (obj === null ? fs.rmSync(p, { force: true }) : fs.writeFileSync(p, JSON.stringify(obj)));
+
+  // Keiner definiert den Key → nicht abgeschaltet.
+  write(local, {}); write(project, {}); write(user, {});
+  assert.deepStrictEqual(resolveDisableAllHooks(d, { scopes: scopesOf() }), { disabled: false, scope: null });
+
+  // Nur User setzt true (Projekt/Local schweigen) → abgeschaltet, Scope user.
+  write(local, {}); write(project, {}); write(user, { disableAllHooks: true });
+  assert.deepStrictEqual(resolveDisableAllHooks(d, { scopes: scopesOf() }), { disabled: true, scope: "user" });
+
+  // Nur Local setzt true → abgeschaltet, Scope local (der eigentliche Angriff).
+  write(local, { disableAllHooks: true }); write(project, {}); write(user, {});
+  assert.deepStrictEqual(resolveDisableAllHooks(d, { scopes: scopesOf() }), { disabled: true, scope: "local" });
+
+  // Project true, aber Local setzt false → höhere Präzedenz gewinnt → NICHT abgeschaltet.
+  write(local, { disableAllHooks: false }); write(project, { disableAllHooks: true }); write(user, {});
+  assert.deepStrictEqual(resolveDisableAllHooks(d, { scopes: scopesOf() }), { disabled: false, scope: "local" });
+
+  // Kaputte höchste Scope-Datei wird übersprungen, nächster definierender Scope zählt.
+  fs.writeFileSync(local, "{ kaputt");
+  write(project, { disableAllHooks: true }); write(user, {});
+  assert.deepStrictEqual(resolveDisableAllHooks(d, { scopes: scopesOf() }), { disabled: true, scope: "project" });
+
+  // Nicht-boolescher Wert zählt nicht als Definition.
+  write(local, { disableAllHooks: "true" }); write(project, {}); write(user, {});
+  assert.deepStrictEqual(resolveDisableAllHooks(d, { scopes: scopesOf() }), { disabled: false, scope: null });
+
+  cleanup(d);
 });

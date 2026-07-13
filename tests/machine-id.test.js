@@ -85,3 +85,70 @@ test("machineId(): frische Maschine, XDG_CONFIG_HOME gesetzt, nirgendwo eine ID 
     fs.rmSync(xdgDir, { recursive: true, force: true });
   }
 });
+
+// Fund E (Migration): eine ID, die eine ÄLTERE Version XDG-only angelegt hat
+// (HOME noch leer), muss beim LESEN an den HOME-Fallback gespiegelt werden —
+// der frühere Spiegel griff nur beim Neu-Minten, nie auf einer schon
+// existierenden XDG-ID. Ohne Heilung beim Lesen mintet ein Leser ohne
+// XDG_CONFIG_HOME eine zweite, divergente ID → Banner für immer "nicht
+// verifiziert".
+test("machineId(): bereits existierende XDG-only-ID wird beim Lesen an HOME gespiegelt (Leser ohne XDG sieht dieselbe)", () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "guard-mid-home3-"));
+  const xdgDir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-mid-xdg3-"));
+  const xdgIdDir = path.join(xdgDir, "elevenworks-guard");
+  fs.mkdirSync(xdgIdDir, { recursive: true });
+  const xdgId = "cafebabecafebabecafebabecafebabe";
+  fs.writeFileSync(path.join(xdgIdDir, "machine-id"), xdgId + "\n"); // XDG-only, HOME leer
+
+  const prevHome = process.env.HOME;
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  process.env.HOME = fakeHome;
+  process.env.XDG_CONFIG_HOME = xdgDir;
+  try {
+    const id = machineId();
+    assert.strictEqual(id, xdgId, "muss die vorhandene XDG-ID wiederverwenden");
+    const homeFile = path.join(fakeHome, ".config", "elevenworks-guard", "machine-id");
+    assert.ok(fs.existsSync(homeFile), "die existierende XDG-ID muss beim Lesen an HOME gespiegelt werden");
+    assert.strictEqual(fs.readFileSync(homeFile, "utf8").trim(), xdgId);
+
+    // Der Bug-Reproduktionsfall: Leser OHNE XDG sieht jetzt dieselbe ID.
+    delete process.env.XDG_CONFIG_HOME;
+    assert.strictEqual(machineId(), xdgId, "Leser ohne XDG muss nach der Heilung dieselbe ID sehen");
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = prevXdg;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    fs.rmSync(xdgDir, { recursive: true, force: true });
+  }
+});
+
+// Gegenprobe: liegt am HOME bereits eine (divergente) ID, darf der Spiegel sie
+// NIE überschreiben — nicht-überschreibend, damit ein bestehender Zustand nie
+// geklobbert wird.
+test("machineId(): existierende HOME-ID wird vom XDG-Spiegel nicht überschrieben", () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "guard-mid-home4-"));
+  const xdgDir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-mid-xdg4-"));
+  const xdgIdDir = path.join(xdgDir, "elevenworks-guard");
+  const homeIdDir = path.join(fakeHome, ".config", "elevenworks-guard");
+  fs.mkdirSync(xdgIdDir, { recursive: true });
+  fs.mkdirSync(homeIdDir, { recursive: true });
+  const xdgId = "1111111111111111aaaaaaaaaaaaaaaa";
+  const homeId = "2222222222222222bbbbbbbbbbbbbbbb";
+  fs.writeFileSync(path.join(xdgIdDir, "machine-id"), xdgId + "\n");
+  fs.writeFileSync(path.join(homeIdDir, "machine-id"), homeId + "\n");
+
+  const prevHome = process.env.HOME;
+  const prevXdg = process.env.XDG_CONFIG_HOME;
+  process.env.HOME = fakeHome;
+  process.env.XDG_CONFIG_HOME = xdgDir;
+  try {
+    assert.strictEqual(machineId(), xdgId, "mit XDG gesetzt gewinnt die XDG-ID");
+    assert.strictEqual(fs.readFileSync(path.join(homeIdDir, "machine-id"), "utf8").trim(), homeId,
+      "die bestehende HOME-ID darf nicht überschrieben werden");
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = prevXdg;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    fs.rmSync(xdgDir, { recursive: true, force: true });
+  }
+});
