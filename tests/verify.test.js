@@ -131,3 +131,126 @@ test("verify: audit.enabled:false im echten Regelwerk → ok:true (Probe protoko
   assert.strictEqual(r.checks.blocksSecret, true);
   cleanup(d);
 });
+
+// --- A6: guard verify probt JEDE Regel, nicht nur .env / .env.example ---
+
+test("A6: saubere Template-Installation → coverage.probed === coverage.total === 49, ok:true, unprobed:[]", () => {
+  const d = install();
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.coverage.total, 49, JSON.stringify(r.coverage));
+  assert.strictEqual(r.coverage.probed, 49, JSON.stringify(r.coverage));
+  assert.deepStrictEqual(r.coverage.unprobed, []);
+  cleanup(d);
+});
+
+test("A6: DIE Regression — eine Regel, deren Muster nicht mehr zieht (Pattern geändert, sonst intakt) → ok:false", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  // cmd.rm-rf bleibt als Regel bestehen (Regelzahl unverändert!), aber ihr
+  // Pattern matcht das geerntete Beweismuster ("rm -rf builddir") nicht mehr —
+  // genau der reale Fehlerfall "meine handgeschriebene Regel greift gar nicht".
+  const rmRf = rules.blockedCommands.find((r) => r.id === "cmd.rm-rf");
+  assert.ok(rmRf, "Fixture-Annahme: cmd.rm-rf existiert im Template");
+  rmRf.pattern = "DIESES_MUSTER_KANN_NIEMALS_MATCHEN_XYZ";
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, "eine Regel, die ihr eigenes Beweismuster nicht mehr blockt, darf NIE ok:true ergeben");
+  assert.ok(r.coverage.probed < r.coverage.total, JSON.stringify(r.coverage));
+  assert.ok(
+    r.details.some((dt) => dt.ok === false && dt.info.includes("cmd.rm-rf") && dt.info.includes("greift nicht")),
+    `erwarte eine ehrliche Fehlermeldung für cmd.rm-rf, bekam: ${JSON.stringify(r.details)}`
+  );
+  cleanup(d);
+});
+
+test("A6: leere Regelklasse (blockedCommands: []) → neutral gemeldet, keine falsche Erfolgs-Behauptung für nicht-existente Regeln", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  const before = rules.blockedCommands.length;
+  rules.blockedCommands = [];
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  // Keine Kommando-Regeln mehr aktiv — coverage.total sinkt ehrlich mit,
+  // es wird NICHTS behauptet, was nicht mehr existiert.
+  assert.strictEqual(r.coverage.total, 49 - before, JSON.stringify(r.coverage));
+  const cmdDetail = r.details.find((dt) => dt.key === "class:blockedCommands");
+  assert.ok(cmdDetail, "Kommando-Regeln-Detail fehlt");
+  assert.strictEqual(cmdDetail.info, "0 Regeln konfiguriert");
+  assert.strictEqual(cmdDetail.ok, true, "eine leere Klasse ist kein Fehlschlag, nur nichts zu beweisen");
+  cleanup(d);
+});
+
+test("A6: eigene Regel ohne Testmuster → ok bleibt true, taucht aber in coverage.unprobed auf (sichtbar als Warnung)", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.blockedCommands.push({ id: "cmd.mine", pattern: "mein-eigenes-kommando", reason: "custom" });
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.ok(r.coverage.unprobed.includes("cmd.mine"), JSON.stringify(r.coverage));
+  assert.strictEqual(r.coverage.total, 50);
+  assert.strictEqual(r.coverage.probed, 49);
+  const warnDetail = r.details.find((dt) => dt.warn === true);
+  assert.ok(warnDetail, "erwarte eine sichtbare ⚠-Zeile für die ungeprüfte eigene Regel");
+  assert.ok(warnDetail.info.includes("cmd.mine"));
+  cleanup(d);
+});
+
+test("A6: eigene Regel MIT selbst gesetztem 'sample'-Feld wird probiert und zählt als probed", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.blockedCommands.push({ id: "cmd.mine", pattern: "mein-eigenes-kommando", reason: "custom", sample: "mein-eigenes-kommando --jetzt" });
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.ok(!r.coverage.unprobed.includes("cmd.mine"), JSON.stringify(r.coverage));
+  assert.strictEqual(r.coverage.total, 50);
+  assert.strictEqual(r.coverage.probed, 50);
+  cleanup(d);
+});
+
+test("A6: eigenes 'sample' überschreibt das mitgelieferte Muster (auch für bekannte Regel-IDs)", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  // path.dotenv bekäme normalerweise das geerntete Muster ".env" — wir
+  // überschreiben es mit einem eigenen, das ebenfalls zieht (**/.env matcht auch
+  // "sub/.env"), um zu beweisen, dass die eigene Angabe tatsächlich verwendet wird.
+  const dotenv = rules.blockedPaths.find((r) => r.id === "path.dotenv");
+  dotenv.sample = "sub/.env";
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.coverage.probed, 49);
+  cleanup(d);
+});
+
+test("A6: monitor-Modus → alle Regeln weiterhin via would-block probiert, ok:true", () => {
+  const d = install({ mode: "monitor" });
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.coverage.probed, 49, JSON.stringify(r.coverage));
+  assert.strictEqual(r.coverage.total, 49);
+  cleanup(d);
+});
+
+test("A6: voller 49-Regel-Lauf fasst das echte Audit-Log weiterhin NICHT an", () => {
+  const d = install();
+  const auditPath = path.join(d, ".claude", "guard-audit.jsonl");
+  fs.writeFileSync(auditPath, '{"ts":"2026-01-01T00:00:00.000Z","event":"allowed"}\n');
+  const before = fs.readFileSync(auditPath, "utf8");
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.coverage.probed, 49, JSON.stringify(r.coverage));
+  assert.strictEqual(fs.readFileSync(auditPath, "utf8"), before, "49-Regel-Lauf darf den Compliance-Trail nicht verändern");
+  cleanup(d);
+});

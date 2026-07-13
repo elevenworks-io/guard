@@ -19,6 +19,7 @@ const GITIGNORE = path.join(CWD, ".gitignore");
 const c = {
   green: (s) => `\x1b[32m${s}\x1b[0m`,
   red: (s) => `\x1b[31m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
   dim: (s) => `\x1b[2m${s}\x1b[0m`,
   bold: (s) => `\x1b[1m${s}\x1b[0m`,
 };
@@ -191,7 +192,7 @@ function verify() {
   }
 
   for (const d of r.details) {
-    const mark = d.ok ? c.green("✓") : c.red("✕");
+    const mark = !d.ok ? c.red("✕") : d.warn ? c.yellow("⚠") : c.green("✓");
     console.log(`  ${mark} ${d.label.padEnd(24)} ${c.dim(d.info)}`);
   }
 
@@ -211,11 +212,15 @@ function verify() {
     host: os.hostname(),
     root: realRoot(CWD),
     checks: r.checks,
+    // Deckungsgrad (A6): wie viele der konfigurierten Regeln wurden mit einem
+    // Beweismuster tatsächlich zum Feuern gebracht — nicht nur "Regelwerk lädt".
+    coverage: r.coverage,
   });
 
   if (r.ok) {
     const suffix = r.mode === "monitor" ? " (monitor-Modus: erkennt, blockt nicht)" : "";
-    console.log(`\n  ${c.green(c.bold("✓ guard ist verifiziert scharf." + suffix))}`);
+    const { probed, total } = r.coverage;
+    console.log(`\n  ${c.green(c.bold(`✓ ${probed}/${total} Regeln nachweislich scharf.` + suffix))}`);
     console.log(c.dim(`  Siegel: ${SEAL_REL}\n`));
     return 0;
   }

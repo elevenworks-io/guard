@@ -101,6 +101,18 @@ const tail = {
 }[state]();
 
 let banner = `[guard] aktiv · ${n} Regeln · ${mode} · ${tail}`;
+
+// Deckungsgrad aus dem Siegel — NUR anhängen, wenn das Siegel tatsächlich eins
+// trägt (ältere Siegel ohne coverage-Feld: Suffix weglassen statt eins zu
+// erfinden) und nur im "verified"-Zustand (sonst gibt es keine gültige Probe,
+// über die man reden könnte).
+if (state === "verified" && seal && seal.coverage
+    && typeof seal.coverage.probed === "number" && typeof seal.coverage.total === "number") {
+  const { probed, total, unprobed } = seal.coverage;
+  const u = Array.isArray(unprobed) ? unprobed.length : 0;
+  banner += u > 0 ? ` · ${probed}/${total} probiert (${u} ungeprüft)` : ` · ${probed}/${total} Regeln probiert`;
+}
+
 if (mode === "monitor") banner += "  ⚠ monitor-Modus — beobachtet nur, blockt nicht";
 
 audit({

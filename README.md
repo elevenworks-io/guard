@@ -69,7 +69,7 @@ Zwei Belege, die zusammen die ganze Frage beantworten:
 meldet sich guard selbst:
 
 ```
-[guard] aktiv · 49 Regeln · enforce · zuletzt verifiziert: 13.07. 14:23 ✓
+[guard] aktiv · 49 Regeln · enforce · zuletzt verifiziert: 13.07. 14:23 ✓ · 49/49 Regeln probiert
 ```
 
 Dieses Banner **kann nur erscheinen, wenn Claude Code guard tatsächlich ausführt** —
@@ -81,16 +81,48 @@ es ist damit der Beweis für die *Verdrahtung*. Bleibt es aus, läuft guard nich
 npx @elevenworks/guard verify
 ```
 
-Er fährt den **echten installierten Hook** mit deinen **echten Regeln** und prüft:
-Hooks registriert · Regelwerk geladen · **blockt Secrets** (`.env`) · **blockt nicht
-pauschal** (`.env.example` bleibt erlaubt) · Audit-Log schreibbar. Er läuft in einem
-Wegwerf-Verzeichnis — **dein Compliance-Log bleibt sauber**, es entstehen keine
-synthetischen Test-Events.
+Er fährt den **echten installierten Hook** mit deinen **echten Regeln** — und zwar
+für **jede einzelne konfigurierte Regel**, nicht nur für zwei Stichproben. Jede
+Pfad-, Kommando-, PII- und Injection-Regel bekommt ein Beweismuster vorgelegt, das
+nachweislich aus dem Testkorpus gezogen wurde, und `verify` prüft, ob dabei
+tatsächlich das erwartete Audit-Event mit der passenden Regel-ID feuert:
+
+```
+✓ Hooks registriert       PreToolUse, PostToolUse, UserPromptSubmit, SessionStart
+✓ Regelwerk geladen       49 Regeln · Modus: enforce
+✓ Pfad-Regeln             21/21 probiert
+✓ Kommando-Regeln         14/14 probiert
+✓ PII-Muster               9/9 probiert
+✓ Injection-Muster         5/5 probiert
+✓ Blockt nicht pauschal   .env.example → erlaubt
+✓ Audit-Log schreibbar    .claude/guard-audit.jsonl
+
+✓ 49/49 Regeln nachweislich scharf.
+```
+
+Er läuft dabei in einem Wegwerf-Verzeichnis — **dein Compliance-Log bleibt
+sauber**, es entstehen keine synthetischen Test-Events.
+
+**Was das beweist — und was nicht.** Jede Regel mit einem Testmuster ist
+nachweislich scharf: `verify` hat sie tatsächlich zum Feuern gebracht, nicht nur
+geladen. Eine eigene Regel ohne Testmuster (du hast selbst eine hinzugefügt) wird
+als **ungeprüft** gemeldet — sichtbar, nie stillschweigend als Erfolg gezählt:
+
+```
+⚠ 3 eigene Regeln ohne Testmuster — nicht probiert: cmd.mine, path.mine, pii.mine
+✓ 49/52 Regeln nachweislich scharf.
+```
+
+Gib ihr ein eigenes `"sample"`-Feld in `guard.rules.json` mit, um sie ebenfalls zu
+beweisen. **Was `verify` NICHT beweist:** dass das Muster einer Regel *semantisch*
+die richtige Wahl für dein Bedrohungsmodell ist — nur, dass die Regel wie
+konfiguriert tatsächlich zieht.
 
 Bei Erfolg schreibt er ein **Siegel** (`.claude/guard-verified.json`) mit einem
-Fingerabdruck über **Verdrahtung + Regeln + Hooks**. Ändert sich eines davon —
-etwa weil jemand den Block-Hook aus `settings.json` entfernt oder `pretool.js`
-entschärft —, wird das Siegel ungültig und das Banner sagt es dir:
+Fingerabdruck über **Verdrahtung + Regeln + Hooks** sowie dem erreichten
+Deckungsgrad. Ändert sich eines davon — etwa weil jemand den Block-Hook aus
+`settings.json` entfernt oder `pretool.js` entschärft —, wird das Siegel ungültig
+und das Banner sagt es dir:
 
 ```
 [guard] aktiv · 49 Regeln · enforce · ⚠ Verdrahtung/Regeln/Hooks seit der Verifikation geändert
@@ -101,6 +133,12 @@ Beobachten-Modus, sagt es auch das — bei jedem Start:
 
 ```
 [guard] aktiv · 49 Regeln · monitor · …  ⚠ monitor-Modus — beobachtet nur, blockt nicht
+```
+
+Und es trägt den Deckungsgrad aus dem letzten `verify`-Lauf sichtbar mit:
+
+```
+[guard] aktiv · 49 Regeln · enforce · zuletzt verifiziert: 13.07. 14:23 ✓ · 49/49 Regeln probiert
 ```
 
 **Im Team:** Regeln, Hooks und Verdrahtung liegen im Repo — das Siegel nicht
