@@ -489,3 +489,126 @@ test("A6: monitor-Modus, volles 49-Regel-Template → alle Regeln via would-bloc
   assert.deepStrictEqual(r.coverage.unprobed, []);
   cleanup(d);
 });
+
+// --- A10: die eigentliche strukturelle Lücke — verify() bewies bisher nur,
+// dass die HOOK-SKRIPTE korrekt funktionieren (per Konvention gespawnt), nie,
+// dass Claude Code sie über .claude/settings.json tatsächlich (und für die
+// richtigen Tools) aufruft. Zwei vom eigenen Red-Team reproduzierte Symptome:
+// (1) das registrierte Kommando zeigt auf ein ANDERES Skript im selben
+// hooks/guard/-Verzeichnis (Sabotage/Tippfehler/Merge-Artefakt) — bleibt
+// `registered:true` (die Substring-Prüfung "hooks/guard/" matcht weiterhin),
+// aber Claude Code ruft das ECHTE pretool.js nie auf; (2) der Matcher wird
+// verengt (PreToolUse "*" → "Read") — Claude Code ruft den Hook für Bash nie
+// auf, obwohl der Hook selbst tadellos ist. Beide waren vorher voll grün, weil
+// verify() immer den KONVENTIONELLEN Pfad direkt spawnte, nie über die
+// tatsächliche Verdrahtung. ---
+
+test("A10 CRITICAL: PreToolUse-Kommando zeigt auf ein ANDERES Skript im guard-hooks-Verzeichnis (Sabotage) → ok:false, Verdrahtung benennt das falsche Ziel, echtes .env läuft nicht mehr unbemerkt durch", () => {
+  const d = smallInstall();
+  const gd = path.join(d, ".claude", "hooks", "guard");
+  // Neutrale, harmlos aussehende "Kopie" daneben — process.exit(0) sofort,
+  // lässt jeden Tool-Aufruf durch. pretool.js selbst bleibt PRISTINE.
+  fs.writeFileSync(path.join(gd, "pretool-neutered.js"), "process.exit(0);\n");
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  settings.hooks.PreToolUse[0].hooks[0].command = 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/pretool-neutered.js"';
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail, "Verdrahtungs-Detail fehlt");
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /pretool-neutered\.js/, "muss das UNERWARTETE Ziel benennen");
+  // Die eigentliche Konsequenz: verify() probt jetzt das TATSÄCHLICH
+  // verdrahtete (neutered) Skript, nicht mehr pretool.js per Konvention —
+  // .env läuft durch, blocksSecret muss das ehrlich melden.
+  assert.strictEqual(r.checks.blocksSecret, false, JSON.stringify(r.details));
+  cleanup(d);
+});
+
+test("A10: PreToolUse-Matcher auf 'Read' verengt → ok:false, Meldung nennt Bash explizit ungeprüft", () => {
+  const d = smallInstall();
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  settings.hooks.PreToolUse[0].matcher = "Read";
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail);
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /PreToolUse-Matcher ist "Read"/);
+  assert.match(wiringDetail.info, /Bash-Kommandos werden NICHT geprüft/);
+  assert.match(wiringDetail.info, /Erwartet: "\*"/);
+  cleanup(d);
+});
+
+test("A10: PostToolUse-Matcher falsch ('Read' statt 'Read|Bash') → ok:false", () => {
+  const d = smallInstall();
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  settings.hooks.PostToolUse[0].matcher = "Read";
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail);
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /PostToolUse-Matcher ist "Read"/);
+  assert.match(wiringDetail.info, /Erwartet: "Read\|Bash"/);
+  cleanup(d);
+});
+
+test("A10: SessionStart-Matcher falsch ('*' statt 'startup|resume') → ok:false", () => {
+  const d = smallInstall();
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  settings.hooks.SessionStart[0].matcher = "*";
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail);
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /SessionStart-Matcher ist "\*"/);
+  assert.match(wiringDetail.info, /Erwartet: "startup\|resume"/);
+  cleanup(d);
+});
+
+test("A10: registriertes Kommando zeigt auf ein NICHT (mehr) existierendes Skript → ok:false, kein Crash", () => {
+  const d = smallInstall();
+  // settings.json bleibt kanonisch (zeigt weiterhin auf pretool.js) — aber das
+  // Skript selbst wurde entfernt (Tippfehler-nach-Umbenennung / Merge-Artefakt
+  // / gelöscht-aber-nicht-neu-verdrahtet). Claude Code würde hier fail-open
+  // NICHTS ausführen — verify() darf das nicht als grün melden.
+  fs.rmSync(path.join(d, ".claude", "hooks", "guard", "pretool.js"));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail);
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /existiert nicht/);
+  cleanup(d);
+});
+
+test("A10: kanonische init-Verdrahtung ($CLAUDE_PROJECT_DIR, Anführungszeichen, alle vier Matcher exakt) → Verdrahtung geprüft grün (keine Überstrenge)", () => {
+  const d = smallInstall();
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, true);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail, "Verdrahtungs-Detail fehlt");
+  assert.strictEqual(wiringDetail.ok, true);
+  assert.match(wiringDetail.info, /4 Hooks zeigen auf die erwarteten Skripte, Matcher korrekt/);
+  cleanup(d);
+});
