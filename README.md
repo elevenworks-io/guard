@@ -15,7 +15,7 @@ npx @elevenworks/guard init
 | Gefährliche Kommandos | `rm -rf`, Force-Push, `curl \| sh`, `DROP TABLE`, … | PreToolUse |
 | PII-Erkennung | E-Mail, IBAN, Steuer-ID, API-Keys im Prompt | UserPromptSubmit |
 | Injection-Erkennung | Muster im gelesenen Inhalt | PostToolUse |
-| Audit-Log | Jede Entscheidung als JSONL, revisionsfähig | alle |
+| Audit-Log | Jede Entscheidung als JSONL — lückenlos und lokal | alle |
 
 ## Wie es funktioniert
 
@@ -184,6 +184,7 @@ frischt die Hooks auf und verifiziert gleich neu.
 - **Fail-open bei Hook-Fehlern.** Ein Hook, der abstürzt oder fehlerhaften Input bekommt, lässt den Workflow bewusst durch (Exit 0), statt ihn zu blockieren — guard soll nie zwischen Claude und die eigentliche Arbeit treten. Der Preis dieser Entscheidung: ein Hook, der nicht läuft, schützt in diesem Moment auch nicht.
 - **Injection-Erkennung ist eine Heuristik, keine Garantie.** Sie fängt bekannte Phrasen (`ignore previous instructions`, `<!-- SYSTEM: ... -->`, …) im gelesenen Inhalt und **warnt** — sie **blockt nicht**, weil Claude den legitimen Inhalt trotzdem braucht (z. B. die echte Bug-Beschreibung in derselben Datei). Umschriebene/paraphrasierte Injektionen entkommen der Phrasenliste (im Testkorpus als `known-gap` markiert). Der harte Schutz bleibt die geblockte Folgeaktion: selbst wenn eine Injection Claude dazu bringt, ein Secret lesen oder senden zu wollen, blockiert `pretool.js` das tatsächlich.
 - **Das Siegel schützt gegen Drift, nicht gegen Sabotage.** Es erkennt, wenn Verdrahtung, Regeln oder Hooks sich geändert haben — also den realistischen Fall „jemand hat etwas verstellt und es vergessen". Wer als Angreifer bereits Schreibrechte auf der Maschine hat, kann Hooks **und** Siegel gemeinsam fälschen. Dagegen hilft kein Hook, sondern nur eine Sandbox. Ebenso gilt weiterhin: `verify` beweist, dass der Hook blockt — dass Claude Code ihn *aufruft*, beweist erst das Banner. Erst beide zusammen ergeben den vollen Beleg.
+- **Das Audit-Log ist nicht manipulationssicher.** Es ist eine gewöhnliche Datei. Wer Schreibrechte auf der Maschine hat, kann Einträge ändern oder löschen — und weder `guard report` noch `guard status` würden das bemerken. Das Log belegt **lückenlos, was guard entschieden hat**; es beweist **nicht**, dass niemand nachträglich daran war. **„Revisionssicher" im Sinne der GoBD ist es ausdrücklich nicht** — dafür braucht es einen externen, unveränderlichen Anker (eine Hash-Kette allein genügt nicht: wer eine Zeile entfernt, kann sie mit einem öffentlichen Algorithmus einfach neu berechnen).
 
 ## Lizenz
 
