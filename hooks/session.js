@@ -25,6 +25,17 @@ const cwd = input.cwd || process.cwd();
 const rules = loadRules(cwd);
 
 if (!rules) {
+  // Auch der "guard greift nicht"-Fall MUSS ein Audit-Event erzeugen — das
+  // ist genau der Zustand, in dem ein Compliance-Nachweis am wichtigsten ist.
+  // audit() toleriert rules=null (nutzt dann den Default-Pfad).
+  audit({
+    event: "session-start",
+    source: input.source || "startup",
+    sessionId: input.session_id || null,
+    mode: null,
+    rules: 0,
+    verified: false,
+  }, null, cwd);
   emit(
     "[guard] ⚠ Regelwerk nicht lesbar — guard greift nicht. Prüfe guard.rules.json.",
     "[guard] Hinweis: guards Regelwerk ist nicht lesbar, es greift derzeit KEIN Schutz."
@@ -34,14 +45,29 @@ if (!rules) {
 const mode = rules.mode || "enforce";
 const n = countRules(rules);
 const seal = readSeal(cwd);
-const fp = computeFingerprint(cwd);
 
-// Verifikationszustand — strikt aus dem Siegel abgeleitet, nie geraten.
-let state;
-if (!seal) state = "none";
-else if (seal.ok === false) state = "failed";
-else if (!fp.fingerprint || seal.fingerprint !== fp.fingerprint) state = "drift";
-else state = "verified";
+// Das Siegel wird NICHT vom Fingerabdruck erfasst (es ist dessen Ausgabe) —
+// es ist also nicht vertrauenswürdige Eingabe und muss strikt validiert werden.
+// computeFingerprint() liest Dateien ohne vollständigen Schutz vor EISDIR/
+// Rechte-/TOCTOU-Fehlern; ein SessionStart-Hook darf dadurch NIE crashen
+// (exit 0 ist ein hartes Muss). Also: alles in try/catch, im Fehlerfall
+// ehrlich auf "failed" degradieren statt eine ungeprüfte Behauptung zu machen.
+let state = "failed";
+try {
+  const fp = computeFingerprint(cwd);
+  if (!seal) {
+    state = "none";
+  } else {
+    const sealValid = seal.ok === true
+      && typeof seal.fingerprint === "string"
+      && !Number.isNaN(new Date(seal.ts).getTime());
+    state = !sealValid ? "failed"
+      : (!fp.fingerprint || seal.fingerprint !== fp.fingerprint) ? "drift"
+      : "verified";
+  }
+} catch {
+  state = "failed";
+}
 
 const verifiedAt = () => {
   const d = new Date(seal.ts);

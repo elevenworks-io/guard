@@ -134,3 +134,57 @@ test("session: fehlendes Regelwerk → Banner sagt ehrlich, dass guard nicht gre
   assert.match(r.banner, /nicht lesbar|greift nicht/i);
   cleanup(d);
 });
+
+test("session: Siegel ohne 'ok'-Feld → NIE 'zuletzt verifiziert' (false positive)", () => {
+  const d = install();
+  seal(d, { ok: undefined });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.doesNotMatch(r.banner, /zuletzt verifiziert/i);
+  assert.match(r.banner, /fehlgeschlagen/i);
+  cleanup(d);
+});
+
+test("session: Siegel ok:true ohne 'fingerprint'-Feld → NIE 'zuletzt verifiziert'", () => {
+  const d = install();
+  seal(d, { fingerprint: undefined });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.doesNotMatch(r.banner, /zuletzt verifiziert/i);
+  assert.match(r.banner, /fehlgeschlagen/i);
+  cleanup(d);
+});
+
+test("session: Siegel mit passendem Fingerabdruck aber kaputtem 'ts' → NIE verifiziert, NIE NaN", () => {
+  const d = install();
+  seal(d, { ts: "kaputt" });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.doesNotMatch(r.banner, /zuletzt verifiziert/i);
+  assert.doesNotMatch(r.banner, /NaN/i);
+  assert.match(r.banner, /fehlgeschlagen/i);
+  cleanup(d);
+});
+
+test("session: Regelwerk unlesbar → trotzdem session-start-Audit-Event (verified:false), exit 0", () => {
+  const d = install();
+  fs.rmSync(path.join(d, "guard.rules.json"));
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  const ev = r.events.find((e) => e.event === "session-start");
+  assert.ok(ev, "session-start-Event fehlt im Regelwerk-unlesbar-Fall");
+  assert.strictEqual(ev.verified, false);
+  cleanup(d);
+});
+
+test("session: Fingerabdruck-Berechnung wirft (EISDIR) → trotzdem exit 0 und Banner", () => {
+  const d = install();
+  seal(d);
+  const hookFile = path.join(d, ".claude", "hooks", "guard", "posttool.js");
+  fs.rmSync(hookFile);
+  fs.mkdirSync(hookFile);
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.ok(r.banner && r.banner.length > 0, "Banner fehlt trotz fail-open-Anspruch");
+  cleanup(d);
+});
