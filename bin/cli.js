@@ -3,9 +3,10 @@
 // Befehle: init (Hooks im Projekt installieren), status (aktive Regeln zeigen)
 "use strict";
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
-const { SEAL_REL } = require("../hooks/lib.js");
+const { SEAL_REL, HOOK_FILES, realRoot } = require("../hooks/lib.js");
 
 const PKG_ROOT = path.join(__dirname, "..");
 const CWD = process.cwd();
@@ -13,6 +14,7 @@ const CLAUDE_DIR = path.join(CWD, ".claude");
 const HOOKS_DIR = path.join(CLAUDE_DIR, "hooks", "guard");
 const SETTINGS = path.join(CLAUDE_DIR, "settings.json");
 const RULES_TARGET = path.join(CWD, "guard.rules.json");
+const GITIGNORE = path.join(CWD, ".gitignore");
 
 const c = {
   green: (s) => `\x1b[32m${s}\x1b[0m`,
@@ -30,6 +32,22 @@ function countRules(rules) {
   );
 }
 
+// Trägt die beiden maschinenlokalen Artefakte (Compliance-Log, Siegel) ins
+// Projekt-.gitignore ein — tatsächlich, nicht nur als Konsolen-Hinweis (der
+// wird zu leicht überlesen). Erstellt die Datei bei Bedarf, dupliziert nie,
+// verändert bestehenden Inhalt nie.
+function ensureGitignore() {
+  const entries = [".claude/guard-audit.jsonl", ".claude/guard-verified.json"];
+  let content = fs.existsSync(GITIGNORE) ? fs.readFileSync(GITIGNORE, "utf8") : "";
+  const lines = new Set(content.split("\n").map((l) => l.trim()).filter(Boolean));
+  const toAdd = entries.filter((e) => !lines.has(e));
+  if (toAdd.length === 0) return;
+  if (content.length && !content.endsWith("\n")) content += "\n";
+  content += toAdd.join("\n") + "\n";
+  fs.writeFileSync(GITIGNORE, content);
+  console.log(`  ${c.green("✓")} .gitignore → ${c.dim(toAdd.join(", "))}`);
+}
+
 function loadRulesFile() {
   for (const p of [RULES_TARGET, path.join(CLAUDE_DIR, "guard.rules.json")]) {
     if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
@@ -40,9 +58,12 @@ function loadRulesFile() {
 function init() {
   console.log(c.bold("\n  @elevenworks/guard — init\n"));
 
-  // 1) Hook-Scripts kopieren
+  // 1) Hook-Scripts kopieren — HOOK_FILES ist die EINZIGE Quelle der Wahrheit
+  // (auch computeFingerprint() hasht genau diese Liste). Eine eigene Kopie
+  // hier wäre eine zweite Liste, die unbemerkt von der ersten abweichen kann —
+  // genau die Lücke, die der Fingerabdruck schließen soll.
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
-  for (const f of ["lib.js", "pretool.js", "prompt.js", "posttool.js", "session.js"]) {
+  for (const f of HOOK_FILES) {
     fs.copyFileSync(path.join(PKG_ROOT, "hooks", f), path.join(HOOKS_DIR, f));
   }
   console.log(`  ${c.green("✓")} Hook-Scripts → ${c.dim(".claude/hooks/guard/")}`);
@@ -83,7 +104,13 @@ function init() {
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2));
   console.log(`  ${c.green("✓")} Hooks registriert → ${c.dim(".claude/settings.json")}`);
 
-  // 4) Selbsttest
+  // 4) .gitignore: die beiden maschinenlokalen Artefakte dürfen nie versioniert
+  // werden — ein committetes Siegel würde bei jedem Klon eine falsche
+  // "verifiziert ✓" erzeugen (host/root-Bindung in verify()/session.js schützt
+  // zusätzlich, aber die Ursache gehört erst gar nicht ins Repo).
+  ensureGitignore();
+
+  // 5) Selbsttest
   const rules = loadRulesFile();
   const n = rules ? countRules(rules) : 0;
   console.log(`\n  ${c.green(c.bold(`✓ ${n} Regeln aktiv`))}`);
@@ -97,7 +124,6 @@ function init() {
     console.log(c.dim("  Installation bleibt bestehen. Ursache oben beheben, dann: guard verify\n"));
     process.exit(1);
   }
-  console.log(c.dim("  · .claude/guard-audit.jsonl und .claude/guard-verified.json in .gitignore aufnehmen"));
   console.log(c.dim("  · Claude Code neu starten — guard meldet sich beim Start\n"));
 }
 
@@ -148,23 +174,42 @@ function report() {
 
 function verify() {
   const { runVerify } = require("../lib/verify.js");
-  const { computeFingerprint, writeSeal } = require("../hooks/lib.js");
+  const { writeSeal } = require("../hooks/lib.js");
   const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
 
   console.log(c.bold("\n  @elevenworks/guard — verify\n"));
-  const r = runVerify({ cwd: CWD });
+
+  let r;
+  try {
+    r = runVerify({ cwd: CWD });
+  } catch (e) {
+    // z.B. mkdtempSync scheitert (Tmpdir nicht schreibbar) — eine ehrliche
+    // Diagnose statt eines rohen Stack-Traces.
+    console.log(`  ${c.red("✕")} Selbsttest konnte nicht laufen: ${e.message}`);
+    console.log(c.dim("  Prüfe, ob das System-Tmpdir schreibbar ist, dann erneut: guard verify\n"));
+    return 1;
+  }
+
   for (const d of r.details) {
     const mark = d.ok ? c.green("✓") : c.red("✕");
     console.log(`  ${mark} ${d.label.padEnd(24)} ${c.dim(d.info)}`);
   }
 
-  const fp = computeFingerprint(CWD);
+  // r.fingerprint wurde bereits von runVerify() aus genau demselben Lauf
+  // berechnet — ein zweites computeFingerprint(CWD) hier wäre nicht nur
+  // doppelte Arbeit, sondern ein TOCTOU-Fenster: das Siegel könnte einen
+  // Fingerabdruck festhalten, der vom tatsächlich getesteten Stand abweicht.
   writeSeal(CWD, {
     ts: new Date().toISOString(),
     guardVersion: pkg.version,
     mode: r.mode,
-    fingerprint: fp.fingerprint,
+    fingerprint: r.fingerprint,
     ok: r.ok,
+    // Maschinenlokaler Bezug (C1): ohne host/root wäre das Siegel
+    // pfadunabhängig und würde bei jedem Klon fälschlich als "verifiziert"
+    // gelten, sobald es versehentlich mitcommittet wird.
+    host: os.hostname(),
+    root: realRoot(CWD),
     checks: r.checks,
   });
 

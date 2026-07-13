@@ -122,6 +122,19 @@ function audit(event, rules, cwd) {
 const SEAL_REL = ".claude/guard-verified.json";
 const HOOK_FILES = ["lib.js", "pretool.js", "posttool.js", "prompt.js", "session.js"];
 
+// Realpath-normalisierte Projekt-Root — macOS' /tmp → /private/tmp (Symlink)
+// erzeugt sonst falsche Negative bei String-Vergleichen zwischen Schreiber
+// (cli.js) und Leser (session.js). Beide MÜSSEN denselben Helper nutzen,
+// sonst können sie auseinanderdriften.
+function realRoot(cwd) {
+  const root = cwd || process.cwd();
+  try {
+    return fs.realpathSync(root);
+  } catch {
+    return root;
+  }
+}
+
 // Nur die guard-relevanten Hook-Registrierungen aus settings.json — fremde
 // Einträge (andere Tools, env-Vars) dürfen das Siegel nicht invalidieren.
 function guardHookEntries(settings) {
@@ -177,4 +190,4 @@ function writeSeal(cwd, seal) {
   fs.writeFileSync(p, JSON.stringify(seal, null, 2) + "\n");
 }
 
-module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit, computeFingerprint, guardHookEntries, readSeal, writeSeal, SEAL_REL };
+module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit, computeFingerprint, guardHookEntries, readSeal, writeSeal, SEAL_REL, HOOK_FILES, realRoot };

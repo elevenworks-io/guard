@@ -82,3 +82,52 @@ test("verify: fasst das echte Audit-Log NICHT an (Compliance-Trail sauber)", () 
   assert.strictEqual(fs.readFileSync(auditPath, "utf8"), before, "verify darf den Compliance-Trail nicht verändern");
   cleanup(d);
 });
+
+// --- C2 / I1: audit.path ist ein first-class, shipped config field und kann
+// absolut sein — der Probe-Hook darf ihn NIE benutzen, sonst landen
+// synthetische Test-Events im ECHTEN Compliance-Log. ---
+
+test("verify: audit.path ABSOLUT (echte Datei außerhalb des Projekts) → bleibt byte-identisch, ok:true", () => {
+  const d = install();
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-real-audit-"));
+  const realAuditPath = path.join(outsideDir, "compliance.jsonl");
+  const seedLine = '{"ts":"2020-01-01T00:00:00.000Z","event":"echtes-produktions-event"}\n';
+  fs.writeFileSync(realAuditPath, seedLine);
+
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.audit = { enabled: true, path: realAuditPath };
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(fs.readFileSync(realAuditPath, "utf8"), seedLine, "das ECHTE Compliance-Log (absoluter Pfad) darf keine synthetischen Probe-Events bekommen");
+  fs.rmSync(outsideDir, { recursive: true, force: true });
+  cleanup(d);
+});
+
+test("verify: audit.path CUSTOM RELATIV (z.B. logs/guard-audit.jsonl) → ok:true (Probe findet ihre eigenen Events trotzdem)", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.audit = { enabled: true, path: "logs/guard-audit.jsonl" };
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.blocksSecret, true);
+  cleanup(d);
+});
+
+test("verify: audit.enabled:false im echten Regelwerk → ok:true (Probe protokolliert trotzdem intern, um sich selbst zu prüfen)", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.audit = { enabled: false };
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.blocksSecret, true);
+  cleanup(d);
+});

@@ -4,7 +4,7 @@ const assert = require("node:assert");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { computeFingerprint, guardHookEntries } = require("../hooks/lib.js");
+const { computeFingerprint, guardHookEntries, HOOK_FILES } = require("../hooks/lib.js");
 
 const HOOKS = ["lib.js", "pretool.js", "posttool.js", "prompt.js", "session.js"];
 
@@ -90,6 +90,18 @@ test("fingerprint: fehlendes Hook-Skript ändert den Abdruck", () => {
   fs.rmSync(path.join(d, ".claude", "hooks", "guard", "posttool.js"));
   assert.notStrictEqual(computeFingerprint(d).fingerprint, before);
   cleanup(d);
+});
+
+// I2: HOOK_FILES ist die einzige Quelle der Wahrheit für "welche Hook-Skripte
+// gibt es" — sowohl für den Fingerabdruck (hier) als auch für init()s Kopierliste
+// (bin/cli.js). Wenn ein Skript hier fehlt, wird es nie gehasht und kann
+// unbemerkt manipuliert werden, während das Siegel weiter "verifiziert" sagt.
+test("HOOK_FILES: jede gelistete Datei existiert tatsächlich in hooks/", () => {
+  const hooksDir = path.join(__dirname, "..", "hooks");
+  for (const f of HOOK_FILES) {
+    assert.ok(fs.existsSync(path.join(hooksDir, f)), `hooks/${f} fehlt, ist aber in HOOK_FILES gelistet`);
+  }
+  assert.deepStrictEqual([...HOOK_FILES].sort(), [...HOOKS].sort(), "HOOK_FILES muss exakt die bekannten Hook-Skripte abdecken");
 });
 
 test("guardHookEntries: extrahiert nur guard-Einträge, deterministisch sortiert", () => {

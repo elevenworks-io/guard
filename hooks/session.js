@@ -5,7 +5,15 @@
 // erscheinen, wenn Claude Code guard tatsächlich ausführt.
 // Behauptet NIE mehr, als das Siegel belegt. Blockt nie (immer exit 0).
 "use strict";
-const { readStdin, loadRules, audit, computeFingerprint, readSeal } = require("./lib.js");
+
+// Muss ganz oben stehen: jeder unerwartete Crash — auch aus dem unguarded
+// process.stdout.write() in emit(), oder aus loadRules()/path.join(), wenn
+// input.cwd kein String ist — darf NIE über exit 0 hinausblocken. guard soll
+// nie zwischen Claude und die eigentliche Arbeit treten.
+process.on("uncaughtException", () => process.exit(0));
+
+const os = require("os");
+const { readStdin, loadRules, audit, computeFingerprint, readSeal, realRoot } = require("./lib.js");
 
 function countRules(rules) {
   return (rules.blockedPaths?.length || 0) + (rules.blockedCommands?.length || 0)
@@ -21,10 +29,10 @@ function emit(systemMessage, additionalContext) {
 }
 
 const input = readStdin() || {};
-const cwd = input.cwd || process.cwd();
+const cwd = typeof input.cwd === "string" ? input.cwd : process.cwd();
 const rules = loadRules(cwd);
 
-if (!rules) {
+if (!rules || typeof rules !== "object") {
   // Auch der "guard greift nicht"-Fall MUSS ein Audit-Event erzeugen — das
   // ist genau der Zustand, in dem ein Compliance-Nachweis am wichtigsten ist.
   // audit() toleriert rules=null (nutzt dann den Default-Pfad).
@@ -61,9 +69,19 @@ try {
     const sealValid = seal.ok === true
       && typeof seal.fingerprint === "string"
       && !Number.isNaN(new Date(seal.ts).getTime());
-    state = !sealValid ? "failed"
-      : (!fp.fingerprint || seal.fingerprint !== fp.fingerprint) ? "drift"
-      : "verified";
+    if (!sealValid) {
+      state = "failed";
+    } else {
+      // Ein Siegel ohne maschinenlokalen Bezug ist kein Beweis für DIESE
+      // Maschine/diesen Checkout — z. B. wenn versehentlich committet und
+      // geklont. Das ist keine fehlgeschlagene Verifikation, sondern schlicht
+      // keine für diesen Rechner: ehrliche Degradation auf "none", nicht
+      // "failed" (das würde eine tatsächlich gescheiterte Prüfung suggerieren).
+      const travelled = seal.host !== os.hostname() || seal.root !== realRoot(cwd);
+      state = travelled ? "none"
+        : (!fp.fingerprint || seal.fingerprint !== fp.fingerprint) ? "drift"
+        : "verified";
+    }
   }
 } catch {
   state = "failed";

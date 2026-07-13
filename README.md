@@ -34,7 +34,7 @@ npx @elevenworks/guard init
 # Claude Code neustarten
 ```
 
-`init` verändert nichts Destruktives: bestehende `settings.json` wird gemergt, ein vorhandenes Regelwerk nie überschrieben.
+`init` verändert nichts Destruktives: bestehende `settings.json` wird gemergt, ein vorhandenes Regelwerk nie überschrieben. `init` trägt zwei maschinenlokale Dateien automatisch in `.gitignore` ein: `.claude/guard-audit.jsonl` (das Compliance-Log) und `.claude/guard-verified.json` (das Verifikations-Siegel, siehe unten) — beide gehören nicht ins Repo.
 
 ## Audit-Log
 
@@ -44,7 +44,7 @@ npx @elevenworks/guard init
 {"ts":"2026-07-09T14:31:02.114Z","event":"blocked","type":"path","tool":"Read","target":".env","ruleId":"path.dotenv","rule":"**/.env"}
 ```
 
-In `.gitignore` aufnehmen. Zusammenfassung: `npx @elevenworks/guard status`
+Wird von `guard init` automatisch in `.gitignore` aufgenommen (zusammen mit dem Siegel `.claude/guard-verified.json`). Zusammenfassung: `npx @elevenworks/guard status`
 
 ## Modus: enforce vs. monitor
 

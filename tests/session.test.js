@@ -5,7 +5,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { computeFingerprint } = require("../hooks/lib.js");
+const nodeOs = require("node:os");
+const { computeFingerprint, realRoot } = require("../hooks/lib.js");
 
 const PKG = path.join(__dirname, "..");
 const HOOKS = ["lib.js", "pretool.js", "posttool.js", "prompt.js", "session.js"];
@@ -39,11 +40,15 @@ function runSession(d, source = "startup") {
   return { exitCode: res.status, out, banner: out.systemMessage || "", events };
 }
 
+// Standardmäßig ein Siegel für DIESE Maschine + diesen Checkout (host/root
+// passend) — das ist der "gültiges Siegel"-Fall. Tests, die einen fremden
+// Rechner/Checkout simulieren wollen, überschreiben host/root explizit.
 function seal(d, over = {}) {
   const fp = computeFingerprint(d);
   fs.writeFileSync(path.join(d, ".claude", "guard-verified.json"), JSON.stringify({
     ts: "2026-07-13T14:23:11.000Z", guardVersion: "0.5.0", mode: "enforce",
     fingerprint: fp.fingerprint, ok: true,
+    host: nodeOs.hostname(), root: realRoot(d),
     checks: { registered: true, blocksSecret: true, allowsTemplate: true, auditWritable: true },
     ...over,
   }, null, 2));
@@ -174,6 +179,8 @@ test("session: Regelwerk unlesbar → trotzdem session-start-Audit-Event (verifi
   const ev = r.events.find((e) => e.event === "session-start");
   assert.ok(ev, "session-start-Event fehlt im Regelwerk-unlesbar-Fall");
   assert.strictEqual(ev.verified, false);
+  assert.strictEqual(ev.mode, null, "mode muss ehrlich null sein — die Compliance-Aufzeichnung darf keinen Modus erfinden");
+  assert.strictEqual(ev.rules, 0, "rules muss 0 sein — kein Regelwerk gelesen, keine Regeln aktiv");
   cleanup(d);
 });
 
@@ -186,5 +193,48 @@ test("session: Fingerabdruck-Berechnung wirft (EISDIR) → trotzdem exit 0 und B
   const r = runSession(d);
   assert.strictEqual(r.exitCode, 0);
   assert.ok(r.banner && r.banner.length > 0, "Banner fehlt trotz fail-open-Anspruch");
+  cleanup(d);
+});
+
+// --- C1: ein gereistes Siegel (committet, geklont) darf NIE "verifiziert" behaupten ---
+
+test("session: sonst gültiges Siegel mit FREMDEM host/root → NICHT 'zuletzt verifiziert', sondern 'nicht verifiziert' (nicht 'fehlgeschlagen')", () => {
+  const d = install();
+  seal(d, { host: "irgendein-anderer-rechner", root: "/irgendwo/anders" });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.doesNotMatch(r.banner, /zuletzt verifiziert/i, "ein gereistes Siegel darf niemals als 'verifiziert' erscheinen");
+  assert.doesNotMatch(r.banner, /fehlgeschlagen/i, "ein gereistes Siegel ist NICHT fehlgeschlagen — es ist einfach nicht dieser Rechner");
+  assert.match(r.banner, /nicht verifiziert/i);
+  cleanup(d);
+});
+
+test("session: Siegel für DIESE Maschine + diesen Checkout → verifiziert normal (keine Überstrenge)", () => {
+  const d = install();
+  seal(d); // Standard-seal() setzt bereits host=os.hostname(), root=realRoot(d)
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.match(r.banner, /zuletzt verifiziert/i);
+  cleanup(d);
+});
+
+test("session: numerischer cwd im Hook-Payload → trotzdem exit 0 (kein Crash aus path.join)", () => {
+  const d = install();
+  seal(d);
+  const res = spawnSync(process.execPath, [path.join(d, ".claude", "hooks", "guard", "session.js")], {
+    input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup", session_id: "test-1", cwd: 12345 }),
+    cwd: d, encoding: "utf8",
+  });
+  assert.strictEqual(res.status, 0);
+  cleanup(d);
+});
+
+test("session: guard.rules.json ist ein JSON-Skalar → gilt als NICHT lesbar (kein '0 Regeln aktiv'-Overclaim)", () => {
+  const d = install();
+  fs.writeFileSync(path.join(d, "guard.rules.json"), JSON.stringify("hallo"));
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.match(r.banner, /nicht lesbar|greift nicht/i);
+  assert.doesNotMatch(r.banner, /aktiv · 0 Regeln/i);
   cleanup(d);
 });
