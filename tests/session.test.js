@@ -6,10 +6,18 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const nodeOs = require("node:os");
-const { computeFingerprint, realRoot } = require("../hooks/lib.js");
+const { computeFingerprint, realRoot, machineId } = require("../hooks/lib.js");
 
 const PKG = path.join(__dirname, "..");
 const HOOKS = ["lib.js", "pretool.js", "posttool.js", "prompt.js", "session.js"];
+
+// I1: machineId() persistiert AUSSERHALB des Repos, unter XDG_CONFIG_HOME
+// (Fallback ~/.config). Für Tests isolieren wir das in ein Wegwerf-Verzeichnis
+// — sonst würde jeder Testlauf die echte ~/.config/elevenworks-guard/machine-id
+// des Entwicklers anfassen. spawnSync() unten erbt process.env standardmäßig,
+// die Kind-Hooks sehen also denselben XDG_CONFIG_HOME.
+const XDG_TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "guard-xdg-"));
+process.env.XDG_CONFIG_HOME = XDG_TEST_DIR;
 
 function install({ mode = "enforce" } = {}) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), "guard-ss-"));
@@ -49,6 +57,9 @@ function seal(d, over = {}) {
     ts: "2026-07-13T14:23:11.000Z", guardVersion: "0.5.0", mode: "enforce",
     fingerprint: fp.fingerprint, ok: true,
     host: nodeOs.hostname(), root: realRoot(d),
+    // I1: das Siegel dieser Maschine — passend zu machineId() im selben
+    // (isolierten) XDG_CONFIG_HOME, den auch die gespawnten Hooks sehen.
+    installId: machineId(),
     checks: { registered: true, blocksSecret: true, allowsTemplate: true, auditWritable: true },
     ...over,
   }, null, 2));
@@ -237,4 +248,98 @@ test("session: guard.rules.json ist ein JSON-Skalar → gilt als NICHT lesbar (k
   assert.match(r.banner, /nicht lesbar|greift nicht/i);
   assert.doesNotMatch(r.banner, /aktiv · 0 Regeln/i);
   cleanup(d);
+});
+
+// --- Minor: guard.rules.json ist ein Array → gilt ebenfalls als NICHT lesbar
+// (typeof [] === "object", das reine typeof-Gate ließ das früher durch) ---
+
+test("session: guard.rules.json ist ein JSON-Array → gilt als NICHT lesbar (Array.isArray-Lücke)", () => {
+  const d = install();
+  fs.writeFileSync(path.join(d, "guard.rules.json"), JSON.stringify([1, 2, 3]));
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.match(r.banner, /nicht lesbar|greift nicht/i);
+  assert.doesNotMatch(r.banner, /aktiv · 0 Regeln/i);
+  cleanup(d);
+});
+
+// --- I1: host+root sind in Devcontainern/CI oft deterministisch identisch —
+// installId (AUSSERHALB des Repos persistiert) muss zusätzlich passen ---
+
+test("session: Siegel mit FREMDER installId (host+root+fingerprint sonst korrekt) → NICHT 'zuletzt verifiziert'", () => {
+  const d = install();
+  seal(d, { installId: "ffffffffffffffffffffffffffffffff" });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.doesNotMatch(r.banner, /zuletzt verifiziert/i, "eine fremde installId darf niemals als 'verifiziert' erscheinen");
+  assert.doesNotMatch(r.banner, /fehlgeschlagen/i, "eine fremde installId ist NICHT fehlgeschlagen — es ist einfach nicht diese Installation");
+  assert.match(r.banner, /nicht verifiziert/i);
+  cleanup(d);
+});
+
+test("session: Siegel OHNE installId (älteres Siegel, host+root+fingerprint sonst korrekt) → NICHT 'zuletzt verifiziert'", () => {
+  const d = install();
+  seal(d, { installId: undefined });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.doesNotMatch(r.banner, /zuletzt verifiziert/i, "ein Siegel ohne installId darf niemals als 'verifiziert' erscheinen");
+  assert.doesNotMatch(r.banner, /fehlgeschlagen/i);
+  assert.match(r.banner, /nicht verifiziert/i);
+  cleanup(d);
+});
+
+test("session: Siegel MIT korrekter installId dieser Maschine → verifiziert normal (keine Überstrenge)", () => {
+  const d = install();
+  seal(d); // seal() setzt installId bereits auf machineId()
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.match(r.banner, /zuletzt verifiziert/i);
+  cleanup(d);
+});
+
+// --- I2: audit.enabled:false — das Banner muss ehrlich sagen, dass kein
+// Compliance-Log geschrieben wird, wenn das Siegel das dokumentiert ---
+
+test("session: Siegel mit auditDisabled:true → Banner hängt 'Audit-Log deaktiviert' an", () => {
+  const d = install();
+  seal(d, { auditDisabled: true });
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.match(r.banner, /zuletzt verifiziert/i);
+  assert.match(r.banner, /Audit-Log deaktiviert/i);
+  cleanup(d);
+});
+
+test("session: Siegel mit auditDisabled:false → kein Deaktiviert-Hinweis im Banner", () => {
+  const d = install();
+  seal(d, { auditDisabled: false });
+  const r = runSession(d);
+  assert.match(r.banner, /zuletzt verifiziert/i);
+  assert.doesNotMatch(r.banner, /Audit-Log deaktiviert/i);
+  cleanup(d);
+});
+
+test("session: älteres Siegel ohne auditDisabled-Feld → kein Hinweis erfunden", () => {
+  const d = install();
+  seal(d, { auditDisabled: undefined });
+  const r = runSession(d);
+  assert.match(r.banner, /zuletzt verifiziert/i);
+  assert.doesNotMatch(r.banner, /Audit-Log deaktiviert/i);
+  cleanup(d);
+});
+
+test("session: machineId() nicht verfügbar (Config-Verzeichnis unschreibbar, ist eine Datei) → trotzdem exit 0, nie fälschlich verifiziert", () => {
+  const d = install();
+  seal(d, { installId: "irgendeine-fremde-id" });
+  const unwritableXdg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "guard-xdg-file-")), "not-a-dir");
+  fs.writeFileSync(unwritableXdg, "ich bin eine Datei, kein Verzeichnis");
+  const res = spawnSync(process.execPath, [path.join(d, ".claude", "hooks", "guard", "session.js")], {
+    input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup", session_id: "test-1", cwd: d }),
+    cwd: d, encoding: "utf8",
+    env: { ...process.env, XDG_CONFIG_HOME: unwritableXdg },
+  });
+  assert.strictEqual(res.status, 0, "machineId()-Fehler darf den Hook nie über exit 0 hinaus crashen lassen (fail-open)");
+  let out = {};
+  try { out = JSON.parse(res.stdout); } catch {}
+  assert.doesNotMatch(out.systemMessage || "", /zuletzt verifiziert/i, "ein kaputtes machineId() darf NIE ein Siegel validieren");
 });

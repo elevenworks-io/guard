@@ -132,6 +132,63 @@ test("verify: audit.enabled:false im echten Regelwerk → ok:true (Probe protoko
   cleanup(d);
 });
 
+// --- I2: audit.enabled:false darf NIE als grünes "✓ Audit-Log schreibbar"
+// erscheinen — das Compliance-Artefakt wird schlicht nie geschrieben (audit()
+// ist ein No-Op). ok bleibt true (Deaktivieren ist eine legitime Wahl), aber
+// ehrlich als Warnung markiert, plus ein Flag am Ergebnis für die Aufrufer. ---
+
+test("verify: audit.enabled:false → auditDisabled:true, KEIN grünes 'Audit-Log schreibbar', stattdessen eine ⚠-Warnung", () => {
+  const d = install();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.audit = { enabled: false };
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.auditDisabled, true);
+  const auditDetail = r.details.find((dt) => dt.key === "auditWritable");
+  assert.ok(auditDetail, "auditWritable-Detail fehlt");
+  assert.strictEqual(auditDetail.warn, true, "muss als Warnung markiert sein, nicht stillschweigend grün");
+  assert.doesNotMatch(auditDetail.label, /^Audit-Log schreibbar$/, "darf nicht als 'schreibbar' behauptet werden — es wird gar nicht geschrieben");
+  assert.match(auditDetail.info, /kein Compliance-Log/i);
+  cleanup(d);
+});
+
+test("verify: audit.enabled unset (Default: aktiv) → auditDisabled:false, normales grünes 'Audit-Log schreibbar'", () => {
+  const d = install();
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.auditDisabled, false);
+  const auditDetail = r.details.find((dt) => dt.key === "auditWritable");
+  assert.strictEqual(auditDetail.ok, true);
+  assert.ok(!auditDetail.warn);
+  cleanup(d);
+});
+
+// --- Minor: ein SKALARES Regelwerk (kein Objekt) darf nie 'Regelwerk geladen ✓'
+// ergeben — sonst greift der Probe-Code (r.audit = …) auf eine primitve und
+// wirft eine TypeError, die bin/cli.js fälschlich als Tmpdir-Fehler auswies. ---
+
+test("verify: guard.rules.json ist ein JSON-String ('hallo') → rulesLoaded:false, ok:false, kein Crash", () => {
+  const d = install();
+  fs.writeFileSync(path.join(d, "guard.rules.json"), JSON.stringify("hallo"));
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.checks.rulesLoaded, false);
+  assert.strictEqual(r.ok, false);
+  const rulesDetail = r.details.find((dt) => dt.key === "rules");
+  assert.strictEqual(rulesDetail.ok, false);
+  cleanup(d);
+});
+
+test("verify: guard.rules.json ist ein JSON-Array → rulesLoaded:false, ok:false, kein Crash", () => {
+  const d = install();
+  fs.writeFileSync(path.join(d, "guard.rules.json"), JSON.stringify([1, 2, 3]));
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.checks.rulesLoaded, false);
+  assert.strictEqual(r.ok, false);
+  cleanup(d);
+});
+
 // --- A6: guard verify probt JEDE Regel, nicht nur .env / .env.example ---
 
 test("A6: saubere Template-Installation → coverage.probed === coverage.total === 49, ok:true, unprobed:[]", () => {

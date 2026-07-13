@@ -3,6 +3,7 @@
 //   exit 0 = erlaubt, exit 2 = blockiert (stderr wird Claude als Begründung gezeigt)
 "use strict";
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -109,11 +110,20 @@ function mask(s) {
   return s.slice(0, 3) + "…" + s.slice(-2) + ` (${s.length} Zeichen)`;
 }
 
+// Einzige Quelle der Wahrheit für "wo liegt das Audit-Log wirklich" — ein
+// absoluter audit.path muss unverändert bleiben (I3: status()/report() haben
+// das früher ignoriert und still 0 Events gezählt, obwohl echte Events an
+// einem absoluten Pfad lagen). audit(), status(), report() und verify()
+// MÜSSEN alle über diesen Helper gehen, sonst können sie wieder auseinanderdriften.
+function auditPathOf(cwd, rules) {
+  const rel = rules?.audit?.path || ".claude/guard-audit.jsonl";
+  return path.isAbsolute(rel) ? rel : path.join(cwd || process.cwd(), rel);
+}
+
 function audit(event, rules, cwd) {
   try {
     if (rules?.audit?.enabled === false) return;
-    const rel = rules?.audit?.path || ".claude/guard-audit.jsonl";
-    const p = path.isAbsolute(rel) ? rel : path.join(cwd || process.cwd(), rel);
+    const p = auditPathOf(cwd, rules);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.appendFileSync(p, JSON.stringify({ ts: new Date().toISOString(), ...event }) + "\n");
   } catch { /* Audit darf den Workflow nie crashen */ }
@@ -190,4 +200,39 @@ function writeSeal(cwd, seal) {
   fs.writeFileSync(p, JSON.stringify(seal, null, 2) + "\n");
 }
 
-module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit, computeFingerprint, guardHookEntries, readSeal, writeSeal, SEAL_REL, HOOK_FILES, realRoot };
+// Wo der maschinenlokale Identifier liegt — AUSSERHALB des Repos, respektiert
+// XDG_CONFIG_HOME, fällt sonst auf ~/.config zurück.
+function machineIdDir() {
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(base, "elevenworks-guard");
+}
+
+// I1: host+root sind in Devcontainern/CI oft deterministisch identisch auf
+// jeder Maschine (Hostname = Servicename, Arbeitsverzeichnis = /workspaces/…
+// oder /app) — ein committetes/geklontes Siegel würde dort trotz host+root-
+// Bindung überall als "verifiziert" gelten. Ein zufälliger, AUSSERHALB des
+// Repos persistierter Identifier schließt genau diese Lücke.
+//
+// Darf NIE werfen (fail-open-Anspruch des gesamten Hooks) — ist das
+// Config-Verzeichnis nicht schreibbar, wird null zurückgegeben. Aufrufer
+// MÜSSEN null strikt als "kein Match" behandeln (null !== ein Siegel ohne
+// installId, sonst würde ein defektes machineId() versehentlich jedes
+// installId-lose Siegel validieren).
+function machineId() {
+  try {
+    const dir = machineIdDir();
+    const file = path.join(dir, "machine-id");
+    try {
+      const existing = fs.readFileSync(file, "utf8").trim();
+      if (existing) return existing;
+    } catch { /* noch keine Datei — unten neu anlegen */ }
+    const id = crypto.randomBytes(16).toString("hex");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, id + "\n");
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { readStdin, loadRules, pathBlocked, commandBlocked, commandTouchesBlockedPath, scanPII, scanInjection, audit, auditPathOf, computeFingerprint, guardHookEntries, readSeal, writeSeal, SEAL_REL, HOOK_FILES, realRoot, machineId };

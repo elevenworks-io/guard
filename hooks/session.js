@@ -13,7 +13,7 @@
 process.on("uncaughtException", () => process.exit(0));
 
 const os = require("os");
-const { readStdin, loadRules, audit, computeFingerprint, readSeal, realRoot } = require("./lib.js");
+const { readStdin, loadRules, audit, computeFingerprint, readSeal, realRoot, machineId } = require("./lib.js");
 
 function countRules(rules) {
   return (rules.blockedPaths?.length || 0) + (rules.blockedCommands?.length || 0)
@@ -32,7 +32,7 @@ const input = readStdin() || {};
 const cwd = typeof input.cwd === "string" ? input.cwd : process.cwd();
 const rules = loadRules(cwd);
 
-if (!rules || typeof rules !== "object") {
+if (!rules || typeof rules !== "object" || Array.isArray(rules)) {
   // Auch der "guard greift nicht"-Fall MUSS ein Audit-Event erzeugen — das
   // ist genau der Zustand, in dem ein Compliance-Nachweis am wichtigsten ist.
   // audit() toleriert rules=null (nutzt dann den Default-Pfad).
@@ -72,12 +72,29 @@ try {
     if (!sealValid) {
       state = "failed";
     } else {
+      // I1: host+root allein reichen in Devcontainern/CI nicht — dort sind
+      // beide auf jeder Maschine deterministisch gleich (Hostname =
+      // Servicename, Arbeitsverzeichnis = /workspaces/… oder /app). Ein
+      // committetes/geklontes Siegel würde sonst dort trotzdem überall
+      // "verifiziert" gelten. installId ist AUSSERHALB des Repos persistiert
+      // und macht das Siegel wirklich maschinenlokal.
+      //
+      // Strikter, nicht-lax Vergleich mit Pflicht auf beiden Seiten: ein
+      // kaputtes machineId() (Config-Verzeichnis nicht schreibbar → null)
+      // darf NIE ein installId-loses Siegel validieren — sonst würde ein
+      // Fehler auf dieser Maschine zu einem falschen "verifiziert" führen,
+      // statt zur ehrlichen Degradation.
+      const mid = machineId();
+      const installIdOk = typeof seal.installId === "string" && seal.installId.length > 0
+        && typeof mid === "string" && mid.length > 0
+        && seal.installId === mid;
+
       // Ein Siegel ohne maschinenlokalen Bezug ist kein Beweis für DIESE
       // Maschine/diesen Checkout — z. B. wenn versehentlich committet und
       // geklont. Das ist keine fehlgeschlagene Verifikation, sondern schlicht
       // keine für diesen Rechner: ehrliche Degradation auf "none", nicht
       // "failed" (das würde eine tatsächlich gescheiterte Prüfung suggerieren).
-      const travelled = seal.host !== os.hostname() || seal.root !== realRoot(cwd);
+      const travelled = seal.host !== os.hostname() || seal.root !== realRoot(cwd) || !installIdOk;
       state = travelled ? "none"
         : (!fp.fingerprint || seal.fingerprint !== fp.fingerprint) ? "drift"
         : "verified";
@@ -114,6 +131,15 @@ if (state === "verified" && seal && seal.coverage
 }
 
 if (mode === "monitor") banner += "  ⚠ monitor-Modus — beobachtet nur, blockt nicht";
+
+// I2: audit.enabled:false bedeutet, dass audit() ein No-Op ist — es entsteht
+// KEIN Compliance-Log. Nur anhängen, wenn das SIEGEL das Feld tatsächlich
+// trägt (neuere Siegel) und nur im "verified"-Zustand — sonst gäbe es keine
+// vertrauenswürdige Grundlage, über die man reden könnte. Ein älteres Siegel
+// ohne dieses Feld: Suffix weglassen statt ihn zu erfinden.
+if (state === "verified" && seal && seal.auditDisabled === true) {
+  banner += "  ⚠ Audit-Log deaktiviert — kein Nachweis";
+}
 
 audit({
   event: "session-start",

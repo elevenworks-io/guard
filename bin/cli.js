@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { SEAL_REL, HOOK_FILES, realRoot } = require("../hooks/lib.js");
+const { SEAL_REL, HOOK_FILES, realRoot, auditPathOf, machineId } = require("../hooks/lib.js");
 
 const PKG_ROOT = path.join(__dirname, "..");
 const CWD = process.cwd();
@@ -38,15 +38,25 @@ function countRules(rules) {
 // wird zu leicht überlesen). Erstellt die Datei bei Bedarf, dupliziert nie,
 // verändert bestehenden Inhalt nie.
 function ensureGitignore() {
-  const entries = [".claude/guard-audit.jsonl", ".claude/guard-verified.json"];
-  let content = fs.existsSync(GITIGNORE) ? fs.readFileSync(GITIGNORE, "utf8") : "";
-  const lines = new Set(content.split("\n").map((l) => l.trim()).filter(Boolean));
-  const toAdd = entries.filter((e) => !lines.has(e));
-  if (toAdd.length === 0) return;
-  if (content.length && !content.endsWith("\n")) content += "\n";
-  content += toAdd.join("\n") + "\n";
-  fs.writeFileSync(GITIGNORE, content);
-  console.log(`  ${c.green("✓")} .gitignore → ${c.dim(toAdd.join(", "))}`);
+  // Minor: die einzige ungeschützte fs-Operation in init() — ein .gitignore,
+  // das ein Verzeichnis ist (oder unlesbar), warf hier früher EISDIR mit
+  // rohem Stack-Trace, NACHDEM Hooks + settings.json schon geschrieben waren
+  // und BEVOR der Selbsttest lief. Der Rest von init() folgt der Disziplin
+  // "ehrlicher Hinweis statt Crash" — das hier auch.
+  try {
+    const entries = [".claude/guard-audit.jsonl", ".claude/guard-verified.json"];
+    let content = fs.existsSync(GITIGNORE) ? fs.readFileSync(GITIGNORE, "utf8") : "";
+    const lines = new Set(content.split("\n").map((l) => l.trim()).filter(Boolean));
+    const toAdd = entries.filter((e) => !lines.has(e));
+    if (toAdd.length === 0) return;
+    if (content.length && !content.endsWith("\n")) content += "\n";
+    content += toAdd.join("\n") + "\n";
+    fs.writeFileSync(GITIGNORE, content);
+    console.log(`  ${c.green("✓")} .gitignore → ${c.dim(toAdd.join(", "))}`);
+  } catch (e) {
+    console.log(`  ${c.yellow("⚠")} .gitignore konnte nicht aktualisiert werden: ${e.message}`);
+    console.log(c.dim("    Bitte manuell eintragen: .claude/guard-audit.jsonl, .claude/guard-verified.json"));
+  }
 }
 
 function loadRulesFile() {
@@ -141,7 +151,7 @@ function status() {
   console.log(`  PII-Muster:         ${rules.piiPatterns?.length || 0}`);
   console.log(`  Injection-Muster:   ${rules.injectionPatterns?.length || 0}`);
   console.log(`  ${c.green(c.bold(`✓ ${countRules(rules)} Regeln aktiv`))}`);
-  const auditPath = path.join(CWD, rules.audit?.path || ".claude/guard-audit.jsonl");
+  const auditPath = auditPathOf(CWD, rules);
   if (fs.existsSync(auditPath)) {
     const lines = fs.readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean);
     const blocked = lines.filter((l) => l.includes('"blocked"')).length;
@@ -158,7 +168,7 @@ function report() {
     console.log(`\n  ${c.red("✕")} Kein guard.rules.json gefunden. Erst ${c.bold("guard init")} ausführen.\n`);
     process.exit(1);
   }
-  const auditPath = path.join(CWD, rules.audit?.path || ".claude/guard-audit.jsonl");
+  const auditPath = auditPathOf(CWD, rules);
   let auditLines = [];
   if (fs.existsSync(auditPath)) {
     auditLines = fs.readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean).map((l) => {
@@ -211,16 +221,29 @@ function verify() {
     // gelten, sobald es versehentlich mitcommittet wird.
     host: os.hostname(),
     root: realRoot(CWD),
+    // I1: host+root allein sind in Devcontainern/CI oft auf jeder Maschine
+    // identisch (Hostname = Servicename, Arbeitsverzeichnis = /workspaces/…
+    // oder /app) — ein committetes/geklontes Siegel würde dort trotzdem
+    // überall "verifiziert" gelten. installId ist AUSSERHALB des Repos
+    // persistiert und schließt diese Lücke.
+    installId: machineId(),
     checks: r.checks,
     // Deckungsgrad (A6): wie viele der konfigurierten Regeln wurden mit einem
     // Beweismuster tatsächlich zum Feuern gebracht — nicht nur "Regelwerk lädt".
     coverage: r.coverage,
+    // I2: ob audit.enabled:false gilt, damit session.js das Banner ehrlich
+    // um den Hinweis "kein Nachweis" ergänzen kann, ohne live nachzuladen —
+    // das Siegel dokumentiert exakt den Stand, der geprüft wurde.
+    auditDisabled: r.auditDisabled === true,
   });
 
   if (r.ok) {
     const suffix = r.mode === "monitor" ? " (monitor-Modus: erkennt, blockt nicht)" : "";
     const { probed, total } = r.coverage;
     console.log(`\n  ${c.green(c.bold(`✓ ${probed}/${total} Regeln nachweislich scharf.` + suffix))}`);
+    if (r.auditDisabled) {
+      console.log(`  ${c.yellow("⚠ Audit-Log deaktiviert — kein Compliance-Nachweis wird geschrieben.")}`);
+    }
     console.log(c.dim(`  Siegel: ${SEAL_REL}\n`));
     return 0;
   }
