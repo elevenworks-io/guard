@@ -258,6 +258,30 @@ test("C1: doppelte Regel-ID (path.dotenv zweimal, Duplikat matcht nie) → ok:fa
   cleanup(d);
 });
 
+// --- Minor (4. Review): eine Regel OHNE (oder mit leerer) ID ist ein
+// eigenständiger Config-Fehler — vorher landete rule.id === undefined
+// unbemerkt im selben seen-Set wie echte IDs (nie als Duplikat erkannt) und
+// unten im Probe-Lauf als `unprobed: [undefined]`, eine irreführende,
+// nicht-handlungsfähige Meldung statt einer ehrlichen Fehlerursache. ---
+
+test("Minor: Regel ohne ID → eigenständiger Config-Fehler, ok:false, kein 'unprobed: [undefined]'", () => {
+  const d = smallInstall();
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  rules.blockedCommands.push({ pattern: "ohne-id-regel", reason: "custom" }); // kein id-Feld
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.uniqueIds, false);
+  assert.ok(!r.coverage.unprobed.includes(undefined), "darf kein 'undefined' in unprobed melden");
+  const detail = r.details.find((dt) => dt.key === "missingId");
+  assert.ok(detail, "missingId-Detail fehlt");
+  assert.strictEqual(detail.ok, false);
+  assert.match(detail.info, /ohne \(oder leere\) ID/);
+  cleanup(d);
+});
+
 // --- I2: checks.blocksSecret geht in `ok` ein, aber MUSS eine sichtbare
 // Detail-Zeile bekommen — sonst: alle Zeilen grün, dann "✕ Verifikation
 // fehlgeschlagen. Ursache oben." ohne dass oben je eine Ursache stand. ---
@@ -270,7 +294,7 @@ test("I2: fehlende Regel path.dotenv → blocksSecret-Detail sichtbar mit Grund,
   const detail = r.details.find((dt) => dt.key === "blocksSecret");
   assert.ok(detail, "blocksSecret-Detail fehlt — I2: undiagnostizierbarer Fehlschlag");
   assert.strictEqual(detail.ok, false);
-  assert.match(detail.info, /path\.dotenv/);
+  assert.match(detail.info, /NICHT blockiert/);
   cleanup(d);
 });
 
@@ -281,7 +305,52 @@ test("I2: vorhandene Regel path.dotenv → blocksSecret-Detail sichtbar und grü
   const detail = r.details.find((dt) => dt.key === "blocksSecret");
   assert.ok(detail, "blocksSecret-Detail fehlt");
   assert.strictEqual(detail.ok, true);
-  assert.match(detail.info, /path\.dotenv/);
+  assert.match(detail.info, /\.env → blockiert/);
+  cleanup(d);
+});
+
+// --- CRITICAL (4. Review): blocksSecret war `probedIds.has("path.dotenv")` —
+// fragt nur "hat IRGENDEINE Regel mit dieser ID auf ihrem (nutzer-
+// überschreibbaren) Muster gefeuert?", nie "wird .env tatsächlich blockiert?".
+// Genau guards EIGENE Fehlermeldung ("Regel greift nicht auf ihr Testmuster —
+// Muster geändert? Eigenes 'sample' setzen.") führt einen Nutzer, der das
+// dotenv-Glob verengt hat (**/.env → **/.env.production), direkt in die
+// Falle: ein passendes eigenes "sample" macht die Probe wieder grün, obwohl
+// `Read .env` im selben Projekt weiterhin ungehindert durchläuft. Das ist die
+// Regression, die vor diesem Fix voll grün war. ---
+
+test("CRITICAL: path.dotenv-Glob verengt + Nutzer folgt guards eigenem Rat (passendes eigenes sample) → blocksSecret bleibt false, ok:false", () => {
+  const d = smallInstall(); // enthält path.dotenv mit dem ausgelieferten **/.env-Glob
+  const rulesPath = path.join(d, "guard.rules.json");
+  const rules = JSON.parse(fs.readFileSync(rulesPath, "utf8"));
+  const dotenv = rules.blockedPaths.find((r) => r.id === "path.dotenv");
+  assert.ok(dotenv, "Fixture-Annahme: path.dotenv existiert");
+  dotenv.glob = "**/.env.production"; // .env selbst matcht dieses Glob nicht mehr
+  dotenv.sample = ".env.production";  // genau der Rat aus guards eigener Fehlermeldung befolgt
+  fs.writeFileSync(rulesPath, JSON.stringify(rules, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  // Die Regel selbst feuert weiterhin auf ihr (jetzt engeres) Testmuster —
+  // das alte, fehlerhafte `probedIds.has("path.dotenv")` wäre hier grün
+  // gewesen. Der neue, ID-unabhängige Spawn gegen das ECHTE ".env" muss das
+  // trotzdem als Fehlschlag erkennen.
+  assert.strictEqual(r.checks.blocksSecret, false, JSON.stringify(r.details));
+  assert.strictEqual(r.ok, false, "ein wide-open .env darf NIE ok:true ergeben, egal wie grün die übrigen Zeilen sind");
+  const detail = r.details.find((dt) => dt.key === "blocksSecret");
+  assert.ok(detail);
+  assert.strictEqual(detail.ok, false);
+  assert.match(detail.info, /NICHT blockiert/, "die Detail-Zeile muss ehrlich sagen, dass .env NICHT blockiert wird");
+  cleanup(d);
+});
+
+test("CRITICAL/monitor: .env → would-block + exit 0 erfüllt blocksSecret weiterhin (monitor-Modus nicht kaputt gemacht)", () => {
+  const d = smallInstall({ mode: "monitor" });
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.checks.blocksSecret, true, JSON.stringify(r.details));
+  const detail = r.details.find((dt) => dt.key === "blocksSecret");
+  assert.ok(detail);
+  assert.strictEqual(detail.ok, true);
+  assert.match(detail.info, /würde blockiert \(monitor\)/);
   cleanup(d);
 });
 
@@ -400,5 +469,23 @@ test("A6: monitor-Modus → alle Regeln weiterhin via would-block probiert, ok:t
   assert.strictEqual(r.ok, true, JSON.stringify(r.details));
   assert.strictEqual(r.coverage.probed, smallTotal(), JSON.stringify(r.coverage));
   assert.strictEqual(r.coverage.total, smallTotal());
+  cleanup(d);
+});
+
+// --- Restore der beim Test-Trim (109s → 16s) verlorenen Vollständigkeits-
+// Garantie: "monitor-Modus → alle Regeln via would-block probiert" prüfte
+// vorher 49/49 auf dem vollen ausgelieferten Template, wurde beim Trim auf
+// die kleine 4-Regel-Fixture verkürzt (der Test oben). Ein einziger
+// zusätzlicher voller Lauf hier hält die 49-Regel-Garantie günstig aufrecht
+// (~3s), ohne zu den 16s der übrigen Suite viel hinzuzufügen. ---
+
+test("A6: monitor-Modus, volles 49-Regel-Template → alle Regeln via would-block probiert, probed===total===49, ok:true", () => {
+  const d = install({ mode: "monitor" });
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, true, JSON.stringify(r.details));
+  assert.strictEqual(r.mode, "monitor");
+  assert.strictEqual(r.coverage.total, 49, JSON.stringify(r.coverage));
+  assert.strictEqual(r.coverage.probed, 49, JSON.stringify(r.coverage));
+  assert.deepStrictEqual(r.coverage.unprobed, []);
   cleanup(d);
 });

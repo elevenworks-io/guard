@@ -98,6 +98,7 @@ bringt:
 ✓ Kommando-Regeln         14/14 probiert
 ✓ PII-Muster               9/9 probiert
 ✓ Injection-Muster         5/5 probiert
+✓ Blockt Secrets          .env → blockiert
 ✓ Blockt nicht pauschal   .env.example → erlaubt
 ✓ Audit-Log schreibbar    .claude/guard-audit.jsonl
 
@@ -122,15 +123,26 @@ beweisen. **Was `verify` NICHT beweist:** dass das Muster einer Regel *semantisc
 die richtige Wahl für dein Bedrohungsmodell ist — nur, dass die Regel wie
 konfiguriert tatsächlich zieht.
 
-Bei Erfolg schreibt er ein **Siegel** (`.claude/guard-verified.json`) mit einem
-Fingerabdruck über **Verdrahtung + Regeln + Hooks** sowie dem erreichten
-Deckungsgrad. Ändert sich eines davon — etwa weil jemand den Block-Hook aus
-`settings.json` entfernt oder `pretool.js` entschärft —, wird das Siegel ungültig
-und das Banner sagt es dir:
+Er schreibt **immer** ein **Siegel** (`.claude/guard-verified.json`) — auch bei
+Fehlschlag (`ok: false`). Das ist Absicht: erst dadurch kann das Banner beim
+nächsten Session-Start ehrlich "FEHLGESCHLAGEN" statt "nicht verifiziert"
+melden. Das Siegel trägt einen Fingerabdruck über **Verdrahtung + Regeln +
+Hooks** sowie den erreichten Deckungsgrad. Ändert sich eines davon — etwa weil
+jemand den Block-Hook aus `settings.json` entfernt oder `pretool.js`
+entschärft —, wird das Siegel ungültig und das Banner sagt es dir:
 
 ```
 [guard] aktiv · 49 Regeln · enforce · ⚠ Verdrahtung/Regeln/Hooks seit der Verifikation geändert
 ```
+
+**Wo guard nachsieht.** `guard init` registriert die Hooks ausschließlich in
+`.claude/settings.json` (Projektebene), und Banner wie `verify` prüfen auch
+nur dort. Hooks, die in einer anderen Settings-Ebene liegen —
+`.claude/settings.local.json` oder `~/.claude/settings.json` — sieht das
+Banner **nicht**. Das ist ein Unter-, kein Überclaim (sicher in die falsche
+Richtung), kann aber überraschen: guard läuft dann eventuell trotzdem (Claude
+Code merged alle Ebenen), das Banner meldet aber fälschlich "es wird derzeit
+NICHTS blockiert".
 
 **Das Banner behauptet nie mehr, als getestet wurde.** Läuft guard nur im
 Beobachten-Modus, sagt es auch das — bei jedem Start:

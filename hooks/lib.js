@@ -246,9 +246,10 @@ function machineId() {
     // HOME-ID sieht — zwei IDs, das Siegel passt nie zusammen, das Banner
     // bleibt für immer bei "nicht verifiziert", ohne dass der Nutzer je
     // erfährt, warum. Reines Lesen — schreibt NIE in den HOME-Fallback.
+    const homeDir = path.join(os.homedir(), ".config", "elevenworks-guard");
+    const homeFile = path.join(homeDir, "machine-id");
     if (process.env.XDG_CONFIG_HOME) {
       try {
-        const homeFile = path.join(os.homedir(), ".config", "elevenworks-guard", "machine-id");
         const existingHome = fs.readFileSync(homeFile, "utf8").trim();
         if (existingHome) return existingHome;
       } catch { /* auch dort keine ID — unten am XDG-Pfad neu anlegen */ }
@@ -257,6 +258,24 @@ function machineId() {
     const id = crypto.randomBytes(16).toString("hex");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, id + "\n");
+
+    // I-WICHTIG: existiert auf einer FRISCHEN Maschine noch KEINE ID an
+    // keinem der beiden Orte, ist die reale Startreihenfolge oft umgekehrt zum
+    // vorigen Fix: eine Shell MIT gesetztem XDG_CONFIG_HOME mintet zuerst eine
+    // ID unter XDG — aber Claude Code selbst (GUI-Start, kein Shell-Profil,
+    // also OHNE dieses env) sieht diese nie und mintet unabhängig eine ZWEITE
+    // ID unter ~/.config. Ergebnis: installId !== machineId() bei JEDER
+    // Session, das Banner bleibt für immer bei "nicht verifiziert", ohne
+    // jeden Hinweis. Fix: beim Neu-Minten unter XDG zusätzlich an den
+    // HOME-Fallback spiegeln, damit ein Leser OHNE XDG dieselbe ID sieht.
+    // Spiegel-Schreiben bleibt fail-open — schlägt es fehl, bleibt die
+    // primäre ID trotzdem gültig zurückgegeben.
+    if (process.env.XDG_CONFIG_HOME && dir !== homeDir) {
+      try {
+        fs.mkdirSync(homeDir, { recursive: true });
+        fs.writeFileSync(homeFile, id + "\n");
+      } catch { /* Spiegel ist best-effort, darf die primäre ID nie kaputt machen */ }
+    }
     return id;
   } catch {
     return null;
