@@ -8,7 +8,10 @@ const HOOKS_DIR = path.join(__dirname, "..", "hooks");
 const RULES_SRC = path.join(__dirname, "..", "templates", "guard.rules.json");
 
 function runFixture(fixture, opts = {}) {
-  const hookFile = fixture.hook === "prompt" ? "prompt.js" : fixture.hook === "posttool" ? "posttool.js" : "pretool.js";
+  const hookFile = fixture.hook === "prompt" ? "prompt.js"
+    : fixture.hook === "posttool" ? "posttool.js"
+    : fixture.hook === "session" ? "session.js"
+    : "pretool.js";
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "guard-fix-"));
   try {
     const rules = JSON.parse(fs.readFileSync(RULES_SRC, "utf8"));
