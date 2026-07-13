@@ -30,3 +30,19 @@ test("samples: jedes Muster ist ein nichtleerer String", () => {
     assert.ok(sample.length > 0, `Muster für ${id} ist leer`);
   }
 });
+
+// --- C1: eine doppelte Regel-ID im ausgelieferten Template lässt guard verify
+// eine Probe fälschlich einem Regel-OBJEKT zuordnen, das nie feuert (siehe
+// tests/verify.test.js "C1: doppelte Regel-ID"). Diese Garantie darf im
+// Template selbst nie regressen — RULE_IDS ist ein Set (dedupliziert bereits),
+// daher hier eine eigene, ordnungserhaltende Zählung über alle vier Klassen. ---
+test("samples: ausgeliefertes Template hat keine doppelten Regel-IDs über alle Regelklassen hinweg", () => {
+  const allIds = [];
+  for (const key of ["blockedPaths", "blockedCommands", "piiPatterns", "injectionPatterns"]) {
+    for (const r of RULES[key] || []) allIds.push(r.id);
+  }
+  const counts = new Map();
+  for (const id of allIds) counts.set(id, (counts.get(id) || 0) + 1);
+  const dupes = [...counts.entries()].filter(([, n]) => n > 1).map(([id]) => id);
+  assert.deepStrictEqual(dupes, [], `doppelte Regel-IDs im Template: ${dupes.join(", ")}`);
+});

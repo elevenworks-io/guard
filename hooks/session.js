@@ -60,9 +60,18 @@ const seal = readSeal(cwd);
 // Rechte-/TOCTOU-Fehlern; ein SessionStart-Hook darf dadurch NIE crashen
 // (exit 0 ist ein hartes Muss). Also: alles in try/catch, im Fehlerfall
 // ehrlich auf "failed" degradieren statt eine ungeprüfte Behauptung zu machen.
+//
+// I4: fp wird AUSSERHALB des try deklariert (Default: nichts registriert) und
+// von computeFingerprint() innerhalb neu zugewiesen — das Banner unten braucht
+// fp.events, um zu erkennen, ob der Block-Hook (PreToolUse) überhaupt noch in
+// settings.json registriert ist. Das ist unabhängig vom Siegel-Vergleich: auch
+// ohne Siegel, mit Drift oder fehlgeschlagener Verifikation muss "der
+// Block-Hook läuft gerade gar nicht" die lauteste Meldung sein — genau der
+// Zustand, den dieses Feature verhindern soll.
+let fp = { fingerprint: null, registered: false, events: [] };
 let state = "failed";
 try {
-  const fp = computeFingerprint(cwd);
+  fp = computeFingerprint(cwd);
   if (!seal) {
     state = "none";
   } else {
@@ -117,28 +126,76 @@ const tail = {
   failed: () => '⚠ letzte Verifikation FEHLGESCHLAGEN — "guard verify" prüfen',
 }[state]();
 
-let banner = `[guard] aktiv · ${n} Regeln · ${mode} · ${tail}`;
+// I4: die Verdrahtungs-Lücke, die guard verify NIE selbst erkennen kann — sie
+// betrifft settings.json JETZT, im laufenden Prozess, nicht den Stand von der
+// letzten Verifikation. Wird PreToolUse aus settings.json entfernt, blockt
+// pretool.js gar nicht mehr, aber ohne diesen Check bliebe das Banner bei
+// "aktiv · N Regeln · enforce · …" — genau die Überbehauptung, die dieses
+// Feature verhindern soll ("Blocks sind erwartbar", obwohl keiner mehr kommt).
+// registeredSet ist LEER, wenn GAR KEIN guard-Hook mehr registriert ist — dann
+// wäre dieser Hook selbst gar nicht aufgerufen worden; die Prüfung greift also
+// nur sinnvoll, wenn fp.registered true ist (mindestens SessionStart lief ja
+// gerade, sonst gäbe es dieses Banner nicht).
+const registeredSet = new Set(fp.events);
+const preToolMissing = fp.registered && !registeredSet.has("PreToolUse");
+const postToolMissing = fp.registered && !registeredSet.has("PostToolUse");
+const promptMissing = fp.registered && !registeredSet.has("UserPromptSubmit");
 
-// Deckungsgrad aus dem Siegel — NUR anhängen, wenn das Siegel tatsächlich eins
-// trägt (ältere Siegel ohne coverage-Feld: Suffix weglassen statt eins zu
-// erfinden) und nur im "verified"-Zustand (sonst gibt es keine gültige Probe,
-// über die man reden könnte).
-if (state === "verified" && seal && seal.coverage
-    && typeof seal.coverage.probed === "number" && typeof seal.coverage.total === "number") {
-  const { probed, total, unprobed } = seal.coverage;
-  const u = Array.isArray(unprobed) ? unprobed.length : 0;
-  banner += u > 0 ? ` · ${probed}/${total} probiert (${u} ungeprüft)` : ` · ${probed}/${total} Regeln probiert`;
-}
+let banner;
+let additionalContext;
 
-if (mode === "monitor") banner += "  ⚠ monitor-Modus — beobachtet nur, blockt nicht";
+if (preToolMissing) {
+  // Der laute Fall: OHNE PreToolUse wird NICHTS mehr blockiert — Secrets/
+  // geschützte Pfade sind vollständig ungeschützt, unabhängig davon, was das
+  // Siegel zuletzt bezeugt hat. Diese Tatsache überschreibt jede andere
+  // Banner-Aussage (verified/drift/failed/none) — sie wäre sonst irreführend
+  // beruhigend ("zuletzt verifiziert ✓" bei einem Hook, der gerade gar nicht
+  // läuft).
+  const alsoMissing = [];
+  if (postToolMissing) alsoMissing.push("PostToolUse (Injection-Erkennung)");
+  if (promptMissing) alsoMissing.push("UserPromptSubmit (PII-Erkennung)");
+  banner = '[guard] ⚠ Block-Hook NICHT registriert — es wird derzeit NICHTS blockiert. "npx @elevenworks/guard init" ausführen.';
+  if (alsoMissing.length) banner += ` Ebenfalls nicht registriert: ${alsoMissing.join(", ")}.`;
+  additionalContext = "[guard] ⚠ Der PreToolUse-Block-Hook ist NICHT in .claude/settings.json registriert — "
+    + "es wird aktuell NICHTS blockiert, Zugriffe auf Secrets/geschützte Pfade werden NICHT geprüft. "
+    + 'Blocks sind in diesem Zustand NICHT zu erwarten. "npx @elevenworks/guard init" ausführen, um die Verdrahtung wiederherzustellen.';
+} else {
+  banner = `[guard] aktiv · ${n} Regeln · ${mode} · ${tail}`;
 
-// I2: audit.enabled:false bedeutet, dass audit() ein No-Op ist — es entsteht
-// KEIN Compliance-Log. Nur anhängen, wenn das SIEGEL das Feld tatsächlich
-// trägt (neuere Siegel) und nur im "verified"-Zustand — sonst gäbe es keine
-// vertrauenswürdige Grundlage, über die man reden könnte. Ein älteres Siegel
-// ohne dieses Feld: Suffix weglassen statt ihn zu erfinden.
-if (state === "verified" && seal && seal.auditDisabled === true) {
-  banner += "  ⚠ Audit-Log deaktiviert — kein Nachweis";
+  // Deckungsgrad aus dem Siegel — NUR anhängen, wenn das Siegel tatsächlich eins
+  // trägt (ältere Siegel ohne coverage-Feld: Suffix weglassen statt eins zu
+  // erfinden) und nur im "verified"-Zustand (sonst gibt es keine gültige Probe,
+  // über die man reden könnte).
+  if (state === "verified" && seal && seal.coverage
+      && typeof seal.coverage.probed === "number" && typeof seal.coverage.total === "number") {
+    const { probed, total, unprobed } = seal.coverage;
+    const u = Array.isArray(unprobed) ? unprobed.length : 0;
+    banner += u > 0 ? ` · ${probed}/${total} probiert (${u} ungeprüft)` : ` · ${probed}/${total} Regeln probiert`;
+  }
+
+  if (mode === "monitor") banner += "  ⚠ monitor-Modus — beobachtet nur, blockt nicht";
+
+  // I2: audit.enabled:false bedeutet, dass audit() ein No-Op ist — es entsteht
+  // KEIN Compliance-Log. Nur anhängen, wenn das SIEGEL das Feld tatsächlich
+  // trägt (neuere Siegel) und nur im "verified"-Zustand — sonst gäbe es keine
+  // vertrauenswürdige Grundlage, über die man reden könnte. Ein älteres Siegel
+  // ohne dieses Feld: Suffix weglassen statt ihn zu erfinden.
+  if (state === "verified" && seal && seal.auditDisabled === true) {
+    banner += "  ⚠ Audit-Log deaktiviert — kein Nachweis";
+  }
+
+  // I4 (schwächer): PostToolUse/UserPromptSubmit blocken nie, sie warnen/
+  // scannen nur — ihr Fehlen ist kein "nichts wird geschützt", aber trotzdem
+  // eine echte Lücke (Injection-Erkennung bzw. PII-Erkennung inaktiv), die das
+  // Banner nicht verschweigen darf.
+  const weaker = [];
+  if (postToolMissing) weaker.push("PostToolUse/Injection-Erkennung nicht registriert");
+  if (promptMissing) weaker.push("UserPromptSubmit/PII-Erkennung nicht registriert");
+  if (weaker.length) banner += `  ⚠ ${weaker.join(", ")}`;
+
+  additionalContext = `[guard] aktiv: ${n} Regeln, Modus ${mode}, Verifikation: ${state}. `
+    + "Zugriffe auf Secrets/geschützte Pfade werden geprüft; Blocks sind erwartbar und kein Fehler — "
+    + "weiche dann auf eine freigegebene Alternative aus, statt den Schutz zu umgehen.";
 }
 
 audit({
@@ -150,9 +207,4 @@ audit({
   verified: state === "verified",
 }, rules, cwd);
 
-emit(
-  banner,
-  `[guard] aktiv: ${n} Regeln, Modus ${mode}, Verifikation: ${state}. `
-  + "Zugriffe auf Secrets/geschützte Pfade werden geprüft; Blocks sind erwartbar und kein Fehler — "
-  + "weiche dann auf eine freigegebene Alternative aus, statt den Schutz zu umgehen."
-);
+emit(banner, additionalContext);

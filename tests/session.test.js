@@ -328,6 +328,43 @@ test("session: älteres Siegel ohne auditDisabled-Feld → kein Hinweis erfunden
   cleanup(d);
 });
 
+// --- I4: entfernt man guards PreToolUse-Eintrag aus settings.json, wird
+// NICHTS mehr blockiert — das Banner darf dann NIE "aktiv · N Regeln · enforce"
+// (mit implizitem "Blocks sind erwartbar") behaupten, egal was das Siegel
+// zuletzt bezeugt hat. Es muss laut mit der Wahrheit führen. ---
+
+test("session: PreToolUse aus settings.json entfernt → Banner führt mit 'nichts blockiert', NICHT mit 'aktiv … enforce', additionalContext behauptet keine Blocks, exit 0", () => {
+  const d = install();
+  // install() registriert standardmäßig NUR PreToolUse (ausreichend für die
+  // übrigen Tests in dieser Datei) — hier brauchen wir die VOLLE Verdrahtung
+  // wie nach "guard init" (alle vier Events), damit computeFingerprint() nach
+  // dem Entfernen von PreToolUse weiterhin registered:true mit den restlichen
+  // drei Events liefert (statt registered:false bei GAR keinem guard-Hook mehr).
+  fs.writeFileSync(path.join(d, ".claude", "settings.json"), JSON.stringify({
+    hooks: {
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "node .claude/hooks/guard/pretool.js" }] }],
+      PostToolUse: [{ matcher: "Read|Bash", hooks: [{ type: "command", command: "node .claude/hooks/guard/posttool.js" }] }],
+      UserPromptSubmit: [{ hooks: [{ type: "command", command: "node .claude/hooks/guard/prompt.js" }] }],
+      SessionStart: [{ matcher: "startup|resume", hooks: [{ type: "command", command: "node .claude/hooks/guard/session.js" }] }],
+    },
+  }, null, 2));
+  seal(d); // gültiges Siegel vom Zeitpunkt, als PreToolUse noch registriert war
+
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  delete settings.hooks.PreToolUse;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  const r = runSession(d);
+  assert.strictEqual(r.exitCode, 0);
+  assert.match(r.banner, /Block-Hook NICHT registriert/i);
+  assert.match(r.banner, /nichts blockiert/i);
+  assert.doesNotMatch(r.banner, /aktiv\s*·.*enforce/i, "darf NICHT 'aktiv · … · enforce' behaupten, wenn der Block-Hook fehlt");
+  const ctx = r.out.hookSpecificOutput?.additionalContext || "";
+  assert.doesNotMatch(ctx, /Blocks sind erwartbar/i, "additionalContext darf Claude nicht sagen, Blocks seien zu erwarten");
+  cleanup(d);
+});
+
 test("session: machineId() nicht verfügbar (Config-Verzeichnis unschreibbar, ist eine Datei) → trotzdem exit 0, nie fälschlich verifiziert", () => {
   const d = install();
   seal(d, { installId: "irgendeine-fremde-id" });

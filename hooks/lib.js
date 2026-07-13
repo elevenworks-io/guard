@@ -164,7 +164,14 @@ function guardHookEntries(settings) {
 
 // Fingerabdruck über Verdrahtung + Regeln + Hook-Skripte.
 // Ohne guard-Registrierung: registered=false (defensiv — nie stiller Erfolg).
-function computeFingerprint(cwd) {
+//
+// M4: opts.rulesSrc lässt einen Aufrufer, der den Regel-Inhalt bereits selbst
+// gelesen hat (z.B. lib/verify.js), diesen Lesevorgang hier NICHT wiederholen
+// — ein zweites unabhängiges fs.readFileSync() wäre ein TOCTOU-Fenster (eine
+// Editierung zwischen den beiden Lesevorgängen würde einen Fingerabdruck von
+// Zustand A mit einer Probe von Zustand B versiegeln). Ohne opts.rulesSrc:
+// unverändertes Verhalten (selbst von der Platte lesen).
+function computeFingerprint(cwd, opts) {
   const root = cwd || process.cwd();
   let entries = [];
   try {
@@ -175,8 +182,12 @@ function computeFingerprint(cwd) {
   const h = crypto.createHash("sha256");
   h.update("wiring:" + JSON.stringify(entries) + "\n");
   let rulesSrc = "<fehlt>";
-  for (const p of [path.join(root, "guard.rules.json"), path.join(root, ".claude", "guard.rules.json")]) {
-    if (fs.existsSync(p)) { rulesSrc = fs.readFileSync(p, "utf8"); break; }
+  if (opts && typeof opts.rulesSrc === "string") {
+    rulesSrc = opts.rulesSrc;
+  } else {
+    for (const p of [path.join(root, "guard.rules.json"), path.join(root, ".claude", "guard.rules.json")]) {
+      if (fs.existsSync(p)) { rulesSrc = fs.readFileSync(p, "utf8"); break; }
+    }
   }
   h.update("rules:" + rulesSrc + "\n");
   for (const f of HOOK_FILES) {
@@ -225,7 +236,24 @@ function machineId() {
     try {
       const existing = fs.readFileSync(file, "utf8").trim();
       if (existing) return existing;
-    } catch { /* noch keine Datei — unten neu anlegen */ }
+    } catch { /* noch keine Datei an diesem Pfad — unten Fallback/Neuanlage */ }
+
+    // I3: Env-Divergenz. Ist XDG_CONFIG_HOME gesetzt, aber dort liegt noch
+    // keine ID, zuerst am HOME-Fallback-Pfad nachsehen, BEVOR eine neue ID
+    // angelegt wird. Ohne das: eine Shell mit gesetztem XDG_CONFIG_HOME (z.B.
+    // "guard verify" manuell ausgeführt) legt eine ID unter XDG an, während
+    // der von Claude Code gespawnte Hook (ohne dieses env) weiterhin die
+    // HOME-ID sieht — zwei IDs, das Siegel passt nie zusammen, das Banner
+    // bleibt für immer bei "nicht verifiziert", ohne dass der Nutzer je
+    // erfährt, warum. Reines Lesen — schreibt NIE in den HOME-Fallback.
+    if (process.env.XDG_CONFIG_HOME) {
+      try {
+        const homeFile = path.join(os.homedir(), ".config", "elevenworks-guard", "machine-id");
+        const existingHome = fs.readFileSync(homeFile, "utf8").trim();
+        if (existingHome) return existingHome;
+      } catch { /* auch dort keine ID — unten am XDG-Pfad neu anlegen */ }
+    }
+
     const id = crypto.randomBytes(16).toString("hex");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, id + "\n");

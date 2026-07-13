@@ -8,6 +8,7 @@ const { spawnSync } = require("node:child_process");
 
 const PKG = path.join(__dirname, "..");
 const CLI = path.join(PKG, "bin", "cli.js");
+const RULES_SRC = path.join(PKG, "templates", "guard.rules.json");
 const HOOK_FILES = ["lib.js", "pretool.js", "posttool.js", "prompt.js", "session.js"];
 
 // I1: guard init self-verifies, which now writes an installId via machineId()
@@ -26,6 +27,30 @@ function runInit(cwd) {
 
 function settingsOf(d) {
   return JSON.parse(fs.readFileSync(path.join(d, ".claude", "settings.json"), "utf8"));
+}
+
+// Perf: `guard init` self-verifies (guard verify) at the end, which spawns
+// ~51 child processes (~3.2s) against the full 49-rule template. Most tests
+// below only assert on settings.json wiring / seal plumbing / installId —
+// none of which needs the full rule count. Pre-seeding a small, VALID
+// guard.rules.json (init() never overwrites an existing one — see the
+// pre-existing "kaputte Installation" test for the same trick) makes the
+// self-test at the end of init() run against ~4 rules instead of 49
+// (~0.3s instead of ~3.2s) while still exercising the exact same code path.
+// One full-template run is kept (the very first test below) as an end-to-end
+// smoke test that a vanilla `guard init` against the real shipped template
+// still works.
+function seedSmallRules(d) {
+  const full = JSON.parse(fs.readFileSync(RULES_SRC, "utf8"));
+  const ids = ["path.dotenv", "cmd.rm-rf", "pii.email", "inj.ignore-previous"];
+  const pick = (key) => (full[key] || []).filter((r) => ids.includes(r.id));
+  const small = {
+    version: full.version, mode: full.mode, allowPaths: full.allowPaths,
+    blockedPaths: pick("blockedPaths"), blockedCommands: pick("blockedCommands"),
+    piiPatterns: pick("piiPatterns"), injectionPatterns: pick("injectionPatterns"),
+    audit: full.audit,
+  };
+  fs.writeFileSync(path.join(d, "guard.rules.json"), JSON.stringify(small, null, 2));
 }
 
 test("cli init: registriert alle vier Events mit den korrekten Matchern", () => {
@@ -55,6 +80,7 @@ test("cli init: registriert alle vier Events mit den korrekten Matchern", () => 
 
 test("cli init: zweimaliges Ausführen ist idempotent (keine Duplikate pro Event)", () => {
   const d = tmpdir();
+  seedSmallRules(d);
   runInit(d);
   const res2 = runInit(d);
   assert.strictEqual(res2.status, 0, res2.stdout + res2.stderr);
@@ -68,6 +94,7 @@ test("cli init: zweimaliges Ausführen ist idempotent (keine Duplikate pro Event
 
 test("cli init: schreibt das Siegel und trägt beide Pfade in .gitignore ein", () => {
   const d = tmpdir();
+  seedSmallRules(d);
   const res = runInit(d);
   assert.strictEqual(res.status, 0, res.stdout + res.stderr);
 
@@ -88,6 +115,7 @@ test("cli init: schreibt das Siegel und trägt beide Pfade in .gitignore ein", (
 
 test("cli init: Siegel trägt eine nicht-leere installId", () => {
   const d = tmpdir();
+  seedSmallRules(d);
   const res = runInit(d);
   assert.strictEqual(res.status, 0, res.stdout + res.stderr);
   const seal = JSON.parse(fs.readFileSync(path.join(d, ".claude", "guard-verified.json"), "utf8"));
@@ -98,6 +126,8 @@ test("cli init: Siegel trägt eine nicht-leere installId", () => {
 test("cli init: zwei init-Läufe in verschiedenen Projekten (gleiche Maschine) → gleiche installId", () => {
   const d1 = tmpdir();
   const d2 = tmpdir();
+  seedSmallRules(d1);
+  seedSmallRules(d2);
   runInit(d1);
   runInit(d2);
   const s1 = JSON.parse(fs.readFileSync(path.join(d1, ".claude", "guard-verified.json"), "utf8"));
@@ -107,6 +137,37 @@ test("cli init: zwei init-Läufe in verschiedenen Projekten (gleiche Maschine) �
   cleanup(d2);
 });
 
+// --- I3: ein unschreibbares Config-Verzeichnis (read-only $HOME, gesperrtes
+// Corporate-Image, manche CI-Images) lässt machineId() fail-open null
+// zurückgeben. Vorher schrieb "guard verify" trotzdem still installId:null
+// ins Siegel und meldete ✓ — session.js verweigert einen installId-losen
+// Vergleich zurecht, das Banner blieb dann für IMMER bei "nicht verifiziert",
+// ohne dass irgendwo ein Hinweis stand, warum. Muss jetzt ehrlich warnen. ---
+
+test("cli init: Maschinen-ID nicht speicherbar (HOME/.config ist eine Datei) → verify warnt ehrlich, installId:null im Siegel, exit 0", () => {
+  const d = tmpdir();
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "guard-cli-nohome-"));
+  // .config existiert bereits als DATEI statt Verzeichnis → jeder Versuch,
+  // darunter zu schreiben/lesen, scheitert (ENOTDIR) — simuliert ein
+  // unschreibbares Config-Verzeichnis, ohne echte Dateirechte zu verändern.
+  fs.writeFileSync(path.join(fakeHome, ".config"), "ich bin eine Datei, kein Verzeichnis");
+  seedSmallRules(d);
+  const { XDG_CONFIG_HOME, ...envWithoutXdg } = process.env;
+  const res = spawnSync(process.execPath, [CLI, "init"], {
+    cwd: d, encoding: "utf8", env: { ...envWithoutXdg, HOME: fakeHome },
+  });
+  assert.strictEqual(res.status, 0, res.stdout + res.stderr);
+  assert.match(res.stdout, /Maschinen-Bindung/i, "erwarte eine sichtbare Warnzeile zur Maschinen-Bindung");
+  assert.match(res.stdout, /nicht speicherbar/i);
+
+  const seal = JSON.parse(fs.readFileSync(path.join(d, ".claude", "guard-verified.json"), "utf8"));
+  assert.strictEqual(seal.installId, null, "installId muss ehrlich null sein, nicht erfunden");
+  assert.strictEqual(seal.ok, true, "Verifikation selbst schlägt NICHT fehl, nur die Maschinen-Bindung ist unvollständig");
+
+  cleanup(d);
+  fs.rmSync(fakeHome, { recursive: true, force: true });
+});
+
 // --- Minor: .gitignore ist ein Verzeichnis (nicht lesbar/schreibbar als Datei)
 // → init darf nicht mit rohem Stack-Trace crashen, sondern muss ehrlich
 // weiterlaufen (Hooks + settings.json bereits geschrieben, Selbsttest folgt) ---
@@ -114,6 +175,7 @@ test("cli init: zwei init-Läufe in verschiedenen Projekten (gleiche Maschine) �
 test("cli init: .gitignore ist ein Verzeichnis (EISDIR) → kein Crash, Rest von init läuft trotzdem durch", () => {
   const d = tmpdir();
   fs.mkdirSync(path.join(d, ".gitignore")); // .gitignore als Verzeichnis statt Datei
+  seedSmallRules(d);
   const res = runInit(d);
   assert.notStrictEqual(res.status, null, "init darf nicht mit einer unbehandelten Exception abstürzen");
   assert.doesNotMatch(res.stdout + res.stderr, /at Object\.|at Module\._compile|node:internal/, "roher Stack-Trace darf dem Nutzer nicht angezeigt werden");

@@ -36,6 +36,8 @@ npx @elevenworks/guard init
 
 `init` verändert nichts Destruktives: bestehende `settings.json` wird gemergt, ein vorhandenes Regelwerk nie überschrieben. `init` trägt zwei maschinenlokale Dateien automatisch in `.gitignore` ein: `.claude/guard-audit.jsonl` (das Compliance-Log) und `.claude/guard-verified.json` (das Verifikations-Siegel, siehe unten) — beide gehören nicht ins Repo.
 
+`init` führt am Ende automatisch den Selbsttest (`guard verify`) aus und **kann mit Exit 1 fehlschlagen** (z. B. wenn eine Regel entschärft wurde oder die Verdrahtung unvollständig ist). Die Installation wird dabei nicht zurückgerollt — Hooks, Regelwerk und `settings.json` bleiben bestehen, die Fehlerursache steht in der Ausgabe. Beheben, dann erneut: `guard verify`.
+
 ## Audit-Log
 
 `.claude/guard-audit.jsonl` — ein Event pro Zeile:
@@ -83,12 +85,14 @@ npx @elevenworks/guard verify
 
 Er fährt den **echten installierten Hook** mit deinen **echten Regeln** — und zwar
 für **jede einzelne konfigurierte Regel**, nicht nur für zwei Stichproben. Jede
-Pfad-, Kommando-, PII- und Injection-Regel bekommt ein Beweismuster vorgelegt, das
-nachweislich aus dem Testkorpus gezogen wurde, und `verify` prüft, ob dabei
-tatsächlich das erwartete Audit-Event mit der passenden Regel-ID feuert:
+Pfad-, Kommando-, PII- und Injection-Regel bekommt ein Beweismuster vorgelegt, und
+`verify` prüft, ob dabei tatsächlich das erwartete Audit-Event mit der passenden
+Regel-ID feuert — das ist die Garantie, die guard tatsächlich einlöst: nicht
+woher ein Muster stammt, sondern dass es die Regel nachweislich zum Feuern
+bringt:
 
 ```
-✓ Hooks registriert       PreToolUse, PostToolUse, UserPromptSubmit, SessionStart
+✓ Hooks registriert       PostToolUse, PreToolUse, SessionStart, UserPromptSubmit
 ✓ Regelwerk geladen       49 Regeln · Modus: enforce
 ✓ Pfad-Regeln             21/21 probiert
 ✓ Kommando-Regeln         14/14 probiert

@@ -1,5 +1,5 @@
 {
-  "$comment": "guard verify — Beweismuster, EIN Eintrag pro Regel-ID aus templates/guard.rules.json. Jedes Muster ist aus dem Testkorpus (tests/attacks/*.jsonl) geerntet und dort nachweislich scharf. NICHT ins Nutzerprojekt installiert (siehe README/Design-Spec): die Injection-Muster enthalten echte Prompt-Injection-Phrasen — lägen sie in guard.rules.json, würde guards eigener PostToolUse-Detektor bei jedem Lesen der Regel-Datei anschlagen.",
+  "$comment": "guard verify — Beweismuster, EIN Eintrag pro Regel-ID aus templates/guard.rules.json. guard verify probt jedes Muster gegen den echten Hook und beweist damit, dass es die Regel tatsächlich zum Feuern bringt (siehe tests/samples.test.js für die Vollständigkeits-Garantie). NICHT ins Nutzerprojekt installiert (siehe README/Design-Spec): die Injection-Muster enthalten echte Prompt-Injection-Phrasen — lägen sie in guard.rules.json, würde guards eigener PostToolUse-Detektor bei jedem Lesen der Regel-Datei anschlagen.",
 
   "path.dotenv": ".env",
   "path.dotenv-variant": "config/.env.local",

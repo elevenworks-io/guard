@@ -184,9 +184,24 @@ function report() {
 }
 
 function verify() {
-  const { runVerify } = require("../lib/verify.js");
-  const { writeSeal } = require("../hooks/lib.js");
-  const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
+  // M3: require() UND das Modul-Top-Level-JSON.parse() von
+  // templates/guard.samples.json (in lib/verify.js) gehören INS try/catch.
+  // Vorher stand require("../lib/verify.js") außerhalb jeder Fehlerbehandlung
+  // — eine fehlende/kaputte Paket-Datei (beschädigte npm-Installation) ließ
+  // verify() mit einem rohen Stack-Trace abstürzen. Innerhalb von init() passiert
+  // das NACH dem Schreiben von Hooks + settings.json — ein Crash hier verschluckt
+  // dann sogar den "Installation bleibt bestehen"-Hinweis.
+  let runVerify, writeSeal, pkg;
+  try {
+    ({ runVerify } = require("../lib/verify.js"));
+    ({ writeSeal } = require("../hooks/lib.js"));
+    pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
+  } catch (e) {
+    console.log(c.bold("\n  @elevenworks/guard — verify\n"));
+    console.log(`  ${c.red("✕")} Selbsttest konnte nicht geladen werden: ${e.message}`);
+    console.log(c.dim("  Prüfe, ob die Paket-Installation vollständig ist (templates/guard.samples.json, package.json), dann erneut: guard verify\n"));
+    return 1;
+  }
 
   console.log(c.bold("\n  @elevenworks/guard — verify\n"));
 
@@ -204,6 +219,18 @@ function verify() {
   for (const d of r.details) {
     const mark = !d.ok ? c.red("✕") : d.warn ? c.yellow("⚠") : c.green("✓");
     console.log(`  ${mark} ${d.label.padEnd(24)} ${c.dim(d.info)}`);
+  }
+
+  // I3: EINMAL auflösen, dann für Bericht UND Siegel dieselbe Auflösung
+  // verwenden. Ein null/leerer Wert (Config-Verzeichnis nicht schreibbar —
+  // read-only $HOME, gesperrtes Corporate-Image, manche CI-Images) wurde
+  // vorher STILL ins Siegel geschrieben: `guard verify` meldete ✓, aber
+  // session.js verweigert einen installId-losen Vergleich zurecht — das
+  // Banner blieb für immer bei "nicht verifiziert", ohne dass irgendwo ein
+  // Hinweis stand, warum. Ehrlich als Warnzeile melden statt es zu verschweigen.
+  const installId = machineId();
+  if (!installId) {
+    console.log(`  ${c.yellow("⚠")} ${"Maschinen-Bindung".padEnd(24)} ${c.dim("Maschinen-ID nicht speicherbar (~/.config/elevenworks-guard) — das Banner kann diese Verifikation NICHT bestätigen")}`);
   }
 
   // r.fingerprint wurde bereits von runVerify() aus genau demselben Lauf
@@ -226,7 +253,7 @@ function verify() {
     // oder /app) — ein committetes/geklontes Siegel würde dort trotzdem
     // überall "verifiziert" gelten. installId ist AUSSERHALB des Repos
     // persistiert und schließt diese Lücke.
-    installId: machineId(),
+    installId,
     checks: r.checks,
     // Deckungsgrad (A6): wie viele der konfigurierten Regeln wurden mit einem
     // Beweismuster tatsächlich zum Feuern gebracht — nicht nur "Regelwerk lädt".
