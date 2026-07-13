@@ -141,10 +141,21 @@ Und es trägt den Deckungsgrad aus dem letzten `verify`-Lauf sichtbar mit:
 [guard] aktiv · 49 Regeln · enforce · zuletzt verifiziert: 13.07. 14:23 ✓ · 49/49 Regeln probiert
 ```
 
-**Im Team:** Regeln, Hooks und Verdrahtung liegen im Repo — das Siegel nicht
-(es ist maschinenlokal). Wer das Repo frisch klont, sieht daher beim ersten Start
-`⚠ nicht verifiziert` und führt einmal `guard verify` aus. Das ist Absicht: ein
-mitgeliefertes „verifiziert ✓" würde nur bezeugen, dass es *irgendwo* mal lief.
+Ist das Audit-Log per `audit.enabled: false` abgeschaltet, sagt guard auch das —
+denn dann entsteht überhaupt kein Nachweis:
+
+```
+[guard] aktiv · 49 Regeln · enforce · zuletzt verifiziert: … ✓  ⚠ Audit-Log deaktiviert — kein Nachweis
+```
+
+**Im Team:** Regeln, Hooks und Verdrahtung liegen im Repo — das Siegel nicht.
+Es ist **an die Maschine gebunden**: neben Fingerabdruck und Projektpfad trägt es
+eine zufällige `installId`, die außerhalb des Repos liegt
+(`~/.config/elevenworks-guard/machine-id`). Selbst ein versehentlich committetes
+Siegel ist damit wertlos — auf einer anderen Maschine (auch im selben Container,
+mit identischem Hostnamen und Pfad) meldet das Banner schlicht `⚠ nicht verifiziert`.
+Wer das Repo frisch klont, führt daher einmal `guard verify` aus. Das ist Absicht:
+ein mitgeliefertes „verifiziert ✓" würde nur bezeugen, dass es *irgendwo* mal lief.
 
 **Nach einem guard-Upgrade** `npx @elevenworks/guard init` erneut ausführen — das
 frischt die Hooks auf und verifiziert gleich neu.
