@@ -612,3 +612,20 @@ test("A10: kanonische init-Verdrahtung ($CLAUDE_PROJECT_DIR, Anführungszeichen,
   assert.match(wiringDetail.info, /4 Hooks zeigen auf die erwarteten Skripte, Matcher korrekt/);
   cleanup(d);
 });
+
+test("A11: \"disableAllHooks\": true in settings.json (sonst kanonische Verdrahtung) → ok:false, Meldung nennt disableAllHooks", () => {
+  const d = smallInstall();
+  const settingsPath = path.join(d, ".claude", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  settings.disableAllHooks = true;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  const r = runVerify({ cwd: d, hookPath: hookOf(d) });
+  assert.strictEqual(r.ok, false, JSON.stringify(r.details));
+  assert.strictEqual(r.checks.wired, false);
+  const wiringDetail = r.details.find((dt) => dt.key === "wiring");
+  assert.ok(wiringDetail);
+  assert.strictEqual(wiringDetail.ok, false);
+  assert.match(wiringDetail.info, /disableAllHooks/);
+  cleanup(d);
+});
