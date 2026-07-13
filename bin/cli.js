@@ -42,7 +42,7 @@ function init() {
 
   // 1) Hook-Scripts kopieren
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
-  for (const f of ["lib.js", "pretool.js", "prompt.js", "posttool.js"]) {
+  for (const f of ["lib.js", "pretool.js", "prompt.js", "posttool.js", "session.js"]) {
     fs.copyFileSync(path.join(PKG_ROOT, "hooks", f), path.join(HOOKS_DIR, f));
   }
   console.log(`  ${c.green("✓")} Hook-Scripts → ${c.dim(".claude/hooks/guard/")}`);
@@ -67,32 +67,38 @@ function init() {
   }
   settings.hooks = settings.hooks || {};
 
-  const ensureHook = (event, command) => {
+  const ensureHook = (event, command, matcher) => {
     settings.hooks[event] = settings.hooks[event] || [];
     const exists = JSON.stringify(settings.hooks[event]).includes("hooks/guard/");
     if (!exists) {
-      settings.hooks[event].push({
-        matcher: event === "PreToolUse" ? "*" : event === "PostToolUse" ? "Read|Bash" : undefined,
-        hooks: [{ type: "command", command }],
-      });
+      settings.hooks[event].push({ matcher, hooks: [{ type: "command", command }] });
     }
   };
-  ensureHook("PreToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/pretool.js"');
-  ensureHook("UserPromptSubmit", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/prompt.js"');
-  ensureHook("PostToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/posttool.js"');
+  ensureHook("PreToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/pretool.js"', "*");
+  ensureHook("UserPromptSubmit", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/prompt.js"', undefined);
+  ensureHook("PostToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/posttool.js"', "Read|Bash");
+  ensureHook("SessionStart", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/session.js"', "startup|resume");
 
   fs.mkdirSync(CLAUDE_DIR, { recursive: true });
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2));
   console.log(`  ${c.green("✓")} Hooks registriert → ${c.dim(".claude/settings.json")}`);
 
-  // 4) Audit-Log vorbereiten + .gitignore-Hinweis
+  // 4) Selbsttest
   const rules = loadRulesFile();
   const n = rules ? countRules(rules) : 0;
   console.log(`\n  ${c.green(c.bold(`✓ ${n} Regeln aktiv`))}`);
-  console.log(c.dim("\n  Nächste Schritte:"));
-  console.log(c.dim("  · guard.rules.json ans Projekt anpassen"));
-  console.log(c.dim("  · .claude/guard-audit.jsonl in .gitignore aufnehmen"));
-  console.log(c.dim("  · Claude Code neu starten, damit Hooks greifen\n"));
+  console.log(c.dim("\n  Selbsttest läuft …"));
+
+  // Die Installation beweist sich sofort selbst. Schlägt sie fehl, wird das
+  // gemeldet — aber NICHT zurückgerollt: eine Teil-Installation ist besser als
+  // gar keine, und der Nutzer braucht die Diagnose, nicht einen leeren Ordner.
+  const code = verify();
+  if (code !== 0) {
+    console.log(c.dim("  Installation bleibt bestehen. Ursache oben beheben, dann: guard verify\n"));
+    process.exit(1);
+  }
+  console.log(c.dim("  · .claude/guard-audit.jsonl und .claude/guard-verified.json in .gitignore aufnehmen"));
+  console.log(c.dim("  · Claude Code neu starten — guard meldet sich beim Start\n"));
 }
 
 function status() {
