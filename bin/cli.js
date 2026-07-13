@@ -5,6 +5,8 @@
 const fs = require("fs");
 const path = require("path");
 
+const { SEAL_REL } = require("../hooks/lib.js");
+
 const PKG_ROOT = path.join(__dirname, "..");
 const CWD = process.cwd();
 const CLAUDE_DIR = path.join(CWD, ".claude");
@@ -138,14 +140,49 @@ function report() {
   console.log(c.dim(`\n  → auch geschrieben nach guard-report.md\n`));
 }
 
+function verify() {
+  const { runVerify } = require("../lib/verify.js");
+  const { computeFingerprint, writeSeal } = require("../hooks/lib.js");
+  const pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
+
+  console.log(c.bold("\n  @elevenworks/guard — verify\n"));
+  const r = runVerify({ cwd: CWD });
+  for (const d of r.details) {
+    const mark = d.ok ? c.green("✓") : c.red("✕");
+    console.log(`  ${mark} ${d.label.padEnd(24)} ${c.dim(d.info)}`);
+  }
+
+  const fp = computeFingerprint(CWD);
+  writeSeal(CWD, {
+    ts: new Date().toISOString(),
+    guardVersion: pkg.version,
+    mode: r.mode,
+    fingerprint: fp.fingerprint,
+    ok: r.ok,
+    checks: r.checks,
+  });
+
+  if (r.ok) {
+    const suffix = r.mode === "monitor" ? " (monitor-Modus: erkennt, blockt nicht)" : "";
+    console.log(`\n  ${c.green(c.bold("✓ guard ist verifiziert scharf." + suffix))}`);
+    console.log(c.dim(`  Siegel: ${SEAL_REL}\n`));
+    return 0;
+  }
+  console.log(`\n  ${c.red(c.bold("✕ Verifikation fehlgeschlagen."))}`);
+  console.log(c.dim("  Ursache oben. Nach der Reparatur erneut: guard verify\n"));
+  return 1;
+}
+
 const cmd = process.argv[2];
 if (cmd === "init") init();
 else if (cmd === "status") status();
 else if (cmd === "report") report();
+else if (cmd === "verify") process.exit(verify());
 else {
   console.log(`\n  ${c.bold("@elevenworks/guard")} — Der Sicherheitsgurt für Claude Code\n`);
   console.log("  Befehle:");
   console.log("    guard init     Hooks + Regelwerk im aktuellen Projekt installieren");
   console.log("    guard status   Aktive Regeln und Audit-Zusammenfassung anzeigen");
-  console.log("    guard report   Nachweis aus dem Audit-Log erzeugen\n");
+  console.log("    guard report   Nachweis aus dem Audit-Log erzeugen");
+  console.log("    guard verify   Selbsttest: ist guard wirklich verdrahtet und scharf?\n");
 }
