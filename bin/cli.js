@@ -3,7 +3,10 @@
 // Befehle: init (Hooks im Projekt installieren), status (aktive Regeln zeigen)
 "use strict";
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+
+const { SEAL_REL, HOOK_FILES, realRoot, auditPathOf, machineId } = require("../hooks/lib.js");
 
 const PKG_ROOT = path.join(__dirname, "..");
 const CWD = process.cwd();
@@ -11,10 +14,12 @@ const CLAUDE_DIR = path.join(CWD, ".claude");
 const HOOKS_DIR = path.join(CLAUDE_DIR, "hooks", "guard");
 const SETTINGS = path.join(CLAUDE_DIR, "settings.json");
 const RULES_TARGET = path.join(CWD, "guard.rules.json");
+const GITIGNORE = path.join(CWD, ".gitignore");
 
 const c = {
   green: (s) => `\x1b[32m${s}\x1b[0m`,
   red: (s) => `\x1b[31m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
   dim: (s) => `\x1b[2m${s}\x1b[0m`,
   bold: (s) => `\x1b[1m${s}\x1b[0m`,
 };
@@ -28,6 +33,32 @@ function countRules(rules) {
   );
 }
 
+// Trägt die beiden maschinenlokalen Artefakte (Compliance-Log, Siegel) ins
+// Projekt-.gitignore ein — tatsächlich, nicht nur als Konsolen-Hinweis (der
+// wird zu leicht überlesen). Erstellt die Datei bei Bedarf, dupliziert nie,
+// verändert bestehenden Inhalt nie.
+function ensureGitignore() {
+  // Minor: die einzige ungeschützte fs-Operation in init() — ein .gitignore,
+  // das ein Verzeichnis ist (oder unlesbar), warf hier früher EISDIR mit
+  // rohem Stack-Trace, NACHDEM Hooks + settings.json schon geschrieben waren
+  // und BEVOR der Selbsttest lief. Der Rest von init() folgt der Disziplin
+  // "ehrlicher Hinweis statt Crash" — das hier auch.
+  try {
+    const entries = [".claude/guard-audit.jsonl", ".claude/guard-verified.json"];
+    let content = fs.existsSync(GITIGNORE) ? fs.readFileSync(GITIGNORE, "utf8") : "";
+    const lines = new Set(content.split("\n").map((l) => l.trim()).filter(Boolean));
+    const toAdd = entries.filter((e) => !lines.has(e));
+    if (toAdd.length === 0) return;
+    if (content.length && !content.endsWith("\n")) content += "\n";
+    content += toAdd.join("\n") + "\n";
+    fs.writeFileSync(GITIGNORE, content);
+    console.log(`  ${c.green("✓")} .gitignore → ${c.dim(toAdd.join(", "))}`);
+  } catch (e) {
+    console.log(`  ${c.yellow("⚠")} .gitignore konnte nicht aktualisiert werden: ${e.message}`);
+    console.log(c.dim("    Bitte manuell eintragen: .claude/guard-audit.jsonl, .claude/guard-verified.json"));
+  }
+}
+
 function loadRulesFile() {
   for (const p of [RULES_TARGET, path.join(CLAUDE_DIR, "guard.rules.json")]) {
     if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, "utf8"));
@@ -38,9 +69,12 @@ function loadRulesFile() {
 function init() {
   console.log(c.bold("\n  @elevenworks/guard — init\n"));
 
-  // 1) Hook-Scripts kopieren
+  // 1) Hook-Scripts kopieren — HOOK_FILES ist die EINZIGE Quelle der Wahrheit
+  // (auch computeFingerprint() hasht genau diese Liste). Eine eigene Kopie
+  // hier wäre eine zweite Liste, die unbemerkt von der ersten abweichen kann —
+  // genau die Lücke, die der Fingerabdruck schließen soll.
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
-  for (const f of ["lib.js", "pretool.js", "prompt.js", "posttool.js"]) {
+  for (const f of HOOK_FILES) {
     fs.copyFileSync(path.join(PKG_ROOT, "hooks", f), path.join(HOOKS_DIR, f));
   }
   console.log(`  ${c.green("✓")} Hook-Scripts → ${c.dim(".claude/hooks/guard/")}`);
@@ -65,32 +99,43 @@ function init() {
   }
   settings.hooks = settings.hooks || {};
 
-  const ensureHook = (event, command) => {
+  const ensureHook = (event, command, matcher) => {
     settings.hooks[event] = settings.hooks[event] || [];
     const exists = JSON.stringify(settings.hooks[event]).includes("hooks/guard/");
     if (!exists) {
-      settings.hooks[event].push({
-        matcher: event === "PreToolUse" ? "*" : event === "PostToolUse" ? "Read|Bash" : undefined,
-        hooks: [{ type: "command", command }],
-      });
+      settings.hooks[event].push({ matcher, hooks: [{ type: "command", command }] });
     }
   };
-  ensureHook("PreToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/pretool.js"');
-  ensureHook("UserPromptSubmit", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/prompt.js"');
-  ensureHook("PostToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/posttool.js"');
+  ensureHook("PreToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/pretool.js"', "*");
+  ensureHook("UserPromptSubmit", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/prompt.js"', undefined);
+  ensureHook("PostToolUse", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/posttool.js"', "Read|Bash");
+  ensureHook("SessionStart", 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/guard/session.js"', "startup|resume");
 
   fs.mkdirSync(CLAUDE_DIR, { recursive: true });
   fs.writeFileSync(SETTINGS, JSON.stringify(settings, null, 2));
   console.log(`  ${c.green("✓")} Hooks registriert → ${c.dim(".claude/settings.json")}`);
 
-  // 4) Audit-Log vorbereiten + .gitignore-Hinweis
+  // 4) .gitignore: die beiden maschinenlokalen Artefakte dürfen nie versioniert
+  // werden — ein committetes Siegel würde bei jedem Klon eine falsche
+  // "verifiziert ✓" erzeugen (host/root-Bindung in verify()/session.js schützt
+  // zusätzlich, aber die Ursache gehört erst gar nicht ins Repo).
+  ensureGitignore();
+
+  // 5) Selbsttest
   const rules = loadRulesFile();
   const n = rules ? countRules(rules) : 0;
   console.log(`\n  ${c.green(c.bold(`✓ ${n} Regeln aktiv`))}`);
-  console.log(c.dim("\n  Nächste Schritte:"));
-  console.log(c.dim("  · guard.rules.json ans Projekt anpassen"));
-  console.log(c.dim("  · .claude/guard-audit.jsonl in .gitignore aufnehmen"));
-  console.log(c.dim("  · Claude Code neu starten, damit Hooks greifen\n"));
+  console.log(c.dim("\n  Selbsttest läuft …"));
+
+  // Die Installation beweist sich sofort selbst. Schlägt sie fehl, wird das
+  // gemeldet — aber NICHT zurückgerollt: eine Teil-Installation ist besser als
+  // gar keine, und der Nutzer braucht die Diagnose, nicht einen leeren Ordner.
+  const code = verify();
+  if (code !== 0) {
+    console.log(c.dim("  Installation bleibt bestehen. Ursache oben beheben, dann: guard verify\n"));
+    process.exit(1);
+  }
+  console.log(c.dim("  · Claude Code neu starten — guard meldet sich beim Start\n"));
 }
 
 function status() {
@@ -106,7 +151,7 @@ function status() {
   console.log(`  PII-Muster:         ${rules.piiPatterns?.length || 0}`);
   console.log(`  Injection-Muster:   ${rules.injectionPatterns?.length || 0}`);
   console.log(`  ${c.green(c.bold(`✓ ${countRules(rules)} Regeln aktiv`))}`);
-  const auditPath = path.join(CWD, rules.audit?.path || ".claude/guard-audit.jsonl");
+  const auditPath = auditPathOf(CWD, rules);
   if (fs.existsSync(auditPath)) {
     const lines = fs.readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean);
     const blocked = lines.filter((l) => l.includes('"blocked"')).length;
@@ -123,7 +168,7 @@ function report() {
     console.log(`\n  ${c.red("✕")} Kein guard.rules.json gefunden. Erst ${c.bold("guard init")} ausführen.\n`);
     process.exit(1);
   }
-  const auditPath = path.join(CWD, rules.audit?.path || ".claude/guard-audit.jsonl");
+  const auditPath = auditPathOf(CWD, rules);
   let auditLines = [];
   if (fs.existsSync(auditPath)) {
     auditLines = fs.readFileSync(auditPath, "utf8").trim().split("\n").filter(Boolean).map((l) => {
@@ -138,14 +183,112 @@ function report() {
   console.log(c.dim(`\n  → auch geschrieben nach guard-report.md\n`));
 }
 
+function verify() {
+  // M3: require() UND das Modul-Top-Level-JSON.parse() von
+  // templates/guard.samples.json (in lib/verify.js) gehören INS try/catch.
+  // Vorher stand require("../lib/verify.js") außerhalb jeder Fehlerbehandlung
+  // — eine fehlende/kaputte Paket-Datei (beschädigte npm-Installation) ließ
+  // verify() mit einem rohen Stack-Trace abstürzen. Innerhalb von init() passiert
+  // das NACH dem Schreiben von Hooks + settings.json — ein Crash hier verschluckt
+  // dann sogar den "Installation bleibt bestehen"-Hinweis.
+  let runVerify, writeSeal, pkg;
+  try {
+    ({ runVerify } = require("../lib/verify.js"));
+    ({ writeSeal } = require("../hooks/lib.js"));
+    pkg = JSON.parse(fs.readFileSync(path.join(PKG_ROOT, "package.json"), "utf8"));
+  } catch (e) {
+    console.log(c.bold("\n  @elevenworks/guard — verify\n"));
+    console.log(`  ${c.red("✕")} Selbsttest konnte nicht geladen werden: ${e.message}`);
+    console.log(c.dim("  Prüfe, ob die Paket-Installation vollständig ist (templates/guard.samples.json, package.json), dann erneut: guard verify\n"));
+    return 1;
+  }
+
+  console.log(c.bold("\n  @elevenworks/guard — verify\n"));
+
+  let r;
+  try {
+    r = runVerify({ cwd: CWD });
+  } catch (e) {
+    // z.B. mkdtempSync scheitert (Tmpdir nicht schreibbar) — eine ehrliche
+    // Diagnose statt eines rohen Stack-Traces.
+    console.log(`  ${c.red("✕")} Selbsttest konnte nicht laufen: ${e.message}`);
+    console.log(c.dim("  Prüfe, ob das System-Tmpdir schreibbar ist, dann erneut: guard verify\n"));
+    return 1;
+  }
+
+  for (const d of r.details) {
+    const mark = !d.ok ? c.red("✕") : d.warn ? c.yellow("⚠") : c.green("✓");
+    console.log(`  ${mark} ${d.label.padEnd(24)} ${c.dim(d.info)}`);
+  }
+
+  // I3: EINMAL auflösen, dann für Bericht UND Siegel dieselbe Auflösung
+  // verwenden. Ein null/leerer Wert (Config-Verzeichnis nicht schreibbar —
+  // read-only $HOME, gesperrtes Corporate-Image, manche CI-Images) wurde
+  // vorher STILL ins Siegel geschrieben: `guard verify` meldete ✓, aber
+  // session.js verweigert einen installId-losen Vergleich zurecht — das
+  // Banner blieb für immer bei "nicht verifiziert", ohne dass irgendwo ein
+  // Hinweis stand, warum. Ehrlich als Warnzeile melden statt es zu verschweigen.
+  const installId = machineId();
+  if (!installId) {
+    console.log(`  ${c.yellow("⚠")} ${"Maschinen-Bindung".padEnd(24)} ${c.dim("Maschinen-ID nicht speicherbar (~/.config/elevenworks-guard) — das Banner kann diese Verifikation NICHT bestätigen")}`);
+  }
+
+  // r.fingerprint wurde bereits von runVerify() aus genau demselben Lauf
+  // berechnet — ein zweites computeFingerprint(CWD) hier wäre nicht nur
+  // doppelte Arbeit, sondern ein TOCTOU-Fenster: das Siegel könnte einen
+  // Fingerabdruck festhalten, der vom tatsächlich getesteten Stand abweicht.
+  writeSeal(CWD, {
+    ts: new Date().toISOString(),
+    guardVersion: pkg.version,
+    mode: r.mode,
+    fingerprint: r.fingerprint,
+    ok: r.ok,
+    // Maschinenlokaler Bezug (C1): ohne host/root wäre das Siegel
+    // pfadunabhängig und würde bei jedem Klon fälschlich als "verifiziert"
+    // gelten, sobald es versehentlich mitcommittet wird.
+    host: os.hostname(),
+    root: realRoot(CWD),
+    // I1: host+root allein sind in Devcontainern/CI oft auf jeder Maschine
+    // identisch (Hostname = Servicename, Arbeitsverzeichnis = /workspaces/…
+    // oder /app) — ein committetes/geklontes Siegel würde dort trotzdem
+    // überall "verifiziert" gelten. installId ist AUSSERHALB des Repos
+    // persistiert und schließt diese Lücke.
+    installId,
+    checks: r.checks,
+    // Deckungsgrad (A6): wie viele der konfigurierten Regeln wurden mit einem
+    // Beweismuster tatsächlich zum Feuern gebracht — nicht nur "Regelwerk lädt".
+    coverage: r.coverage,
+    // I2: ob audit.enabled:false gilt, damit session.js das Banner ehrlich
+    // um den Hinweis "kein Nachweis" ergänzen kann, ohne live nachzuladen —
+    // das Siegel dokumentiert exakt den Stand, der geprüft wurde.
+    auditDisabled: r.auditDisabled === true,
+  });
+
+  if (r.ok) {
+    const suffix = r.mode === "monitor" ? " (monitor-Modus: erkennt, blockt nicht)" : "";
+    const { probed, total } = r.coverage;
+    console.log(`\n  ${c.green(c.bold(`✓ ${probed}/${total} Regeln nachweislich scharf.` + suffix))}`);
+    if (r.auditDisabled) {
+      console.log(`  ${c.yellow("⚠ Audit-Log deaktiviert — kein Compliance-Nachweis wird geschrieben.")}`);
+    }
+    console.log(c.dim(`  Siegel: ${SEAL_REL}\n`));
+    return 0;
+  }
+  console.log(`\n  ${c.red(c.bold("✕ Verifikation fehlgeschlagen."))}`);
+  console.log(c.dim("  Ursache oben. Nach der Reparatur erneut: guard verify\n"));
+  return 1;
+}
+
 const cmd = process.argv[2];
 if (cmd === "init") init();
 else if (cmd === "status") status();
 else if (cmd === "report") report();
+else if (cmd === "verify") process.exit(verify());
 else {
   console.log(`\n  ${c.bold("@elevenworks/guard")} — Der Sicherheitsgurt für Claude Code\n`);
   console.log("  Befehle:");
   console.log("    guard init     Hooks + Regelwerk im aktuellen Projekt installieren");
   console.log("    guard status   Aktive Regeln und Audit-Zusammenfassung anzeigen");
-  console.log("    guard report   Nachweis aus dem Audit-Log erzeugen\n");
+  console.log("    guard report   Nachweis aus dem Audit-Log erzeugen");
+  console.log("    guard verify   Selbsttest: ist guard wirklich verdrahtet und scharf?\n");
 }

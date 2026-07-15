@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // @elevenworks/guard — UserPromptSubmit Hook
 // Erkennt PII und Secrets im Prompt, bevor sie das Gerät verlassen.
-// action "block" → Prompt wird gestoppt. action "warn" → Hinweis an Claude, weiterarbeiten.
+// action "block" → Prompt wird gestoppt (enforce) bzw. nur protokolliert (monitor).
+// action "warn"  → Hinweis an Claude, weiterarbeiten (mode-unabhängig).
 "use strict";
 const { readStdin, loadRules, scanPII, audit } = require("./lib.js");
 
@@ -21,8 +22,22 @@ const blockers = hits.filter((h) => h.action === "block");
 const warns = hits.filter((h) => h.action === "warn");
 
 if (blockers.length > 0) {
-  audit({ event: "blocked", type: "pii-prompt", findings: blockers }, rules, cwd);
   const list = [...new Set(blockers.map((b) => `${b.name} (${b.sample})`))].join(", ");
+  // monitor: NICHT blockieren, nur als would-block protokollieren — deckungsgleich
+  // mit pretool.js decide(). Sonst widerspräche der Modus seinem eigenen
+  // Versprechen ("audit-only, nichts wird blockiert"): ein action:"block"-PII-
+  // Treffer (IBAN, AWS-/Anthropic-Key, …) würde ein evaluierendes Team im
+  // Monitor-Modus hart mit Exit 2 stoppen. Der Hinweis geht als JSON-
+  // systemMessage NUR an den Nutzer (bei UserPromptSubmit landet plain-text-
+  // stdout sonst im Modell-Kontext — hier unerwünscht).
+  if ((rules.mode || "enforce") === "monitor") {
+    audit({ event: "would-block", type: "pii-prompt", findings: blockers }, rules, cwd);
+    process.stdout.write(JSON.stringify({
+      systemMessage: `[guard] ⚠️ monitor-Modus: würde Prompt blockieren (sensible Daten: ${list}) — durchgelassen, protokolliert.`,
+    }));
+    process.exit(0);
+  }
+  audit({ event: "blocked", type: "pii-prompt", findings: blockers }, rules, cwd);
   process.stderr.write(
     `[guard] Prompt blockiert — enthält sensible Daten: ${list}. ` +
     `Bitte entfernen oder durch Platzhalter ersetzen, dann erneut senden.`
